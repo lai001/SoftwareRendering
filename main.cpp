@@ -2,6 +2,7 @@
 #include <vector>
 #include <regex>
 #include <numeric>
+#include <random>
 
 #include "assimp/Importer.hpp" 
 #include "assimp/postprocess.h"
@@ -9,6 +10,21 @@
 #include "spdlog/spdlog.h"
 
 #include "PPM.hpp"
+
+glm::vec3 randomColor()
+{
+	std::function<double()> randomDoubleValue = []() {
+		std::random_device rd;
+		std::uniform_int_distribution<int> dist(0, 255);
+		return dist(rd) / 255.0;
+	};
+
+	glm::vec3 color;
+	color.r = randomDoubleValue();
+	color.g = randomDoubleValue();
+	color.b = randomDoubleValue();
+	return color;
+}
 
 std::string getFolder(std::string filename)
 {
@@ -21,50 +37,87 @@ std::string getFolder(std::string filename)
 	return directory;
 }
 
-int main(int argc, char ** argv)
+void drawModelPolygon(PPM* ppm, std::string modelPath)
 {
-	std::string appPath = argv[0];
-	std::string appFolderPath = getFolder(appPath);
+	std::function<glm::vec2(aiMesh*, unsigned int)> getPoint = [ppm](aiMesh* mesh, unsigned int index) {
+		aiVector3D vertex = mesh->mVertices[index];
+		return glm::vec2(vertex.x*ppm->width / 2.0, vertex.y*ppm->height / 2.0);
+	};
 
-	int width = 800;
-	int height = 800;
-
-	PPM* ppm = new PPM(width, height);
-	ppm->addLine({ 80, 40 }, { 13, 20 }, { 254, 254, 254 });
-	ppm->addTriangle({ {0, 100},{200, 100},{100,50} }, { 255,0,0 });
-
-	ppm->addTriangleFillWithColor({ {0, 120},{200, 120},{100,150} }, { 255,0,0 });
+	float width = ppm->width;
+	float height = ppm->height;
 
 	Assimp::Importer* importer = new Assimp::Importer();
-	const aiScene* scene = importer->ReadFile(appFolderPath.append("\\Resource\\obj\\african_head\\african_head.obj"), (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
+	const aiScene* scene = importer->ReadFile(modelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
 	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
 	{
 		aiMesh* mesh = scene->mMeshes[meshIndex];
 		for (int faceIndex = 0; faceIndex < mesh->mNumFaces; faceIndex++)
 		{
 			aiFace face = mesh->mFaces[faceIndex];
-			for (int vertexIndex = 0; vertexIndex < face.mNumIndices; vertexIndex++) 
+			for (int vertexIndex = 0; vertexIndex < face.mNumIndices; vertexIndex++)
 			{
 				unsigned int index = face.mIndices[vertexIndex];
 				unsigned int nextIndex = face.mIndices[(vertexIndex + 1) % face.mNumIndices];
-				aiVector3D v0 = mesh->mVertices[index];
-				aiVector3D v1 = mesh->mVertices[nextIndex];
-				int x0 = (v0.x + 1.0)*width / 2.0;
-				int y0 = (v0.y + 1.0)*height / 2.0;
-				int x1 = (v1.x + 1.0)*width / 2.0;
-				int y1 = (v1.y + 1.0)*height / 2.0;
-				y0 = height - y0;
-				y1 = height - y1;
-				Color color;
-				color.r = 255;
-				ppm->addLine({ x0,y0 }, { x1,y1 }, color);
+				glm::vec2 p0 = getPoint(mesh, index);
+				glm::vec2 p1 = getPoint(mesh, nextIndex);;
+				ppm->addLine(p0, p1, {1, 0, 0});
 			}
 		}
 	}
-
-	ppm->writeToFile("image.ppm");
-	delete ppm;
 	delete importer;
-	system("pause");
+}
+
+void drawModel(PPM* ppm, std::string modelPath)
+{
+	std::function<Vertex(aiMesh*, unsigned int)> getVertex = [ppm](aiMesh* mesh, unsigned int index) {
+		aiVector3D vertex = mesh->mVertices[index];
+		double z = rangeMap(vertex.z, -1, 1, 0, 1);
+		z = 1 - z;
+		Vertex v = Vertex({ vertex.x*ppm->width / 2.0, vertex.y*ppm->height / 2.0, z }, { 1, 0, 0 });
+		return v;
+	};
+
+	Assimp::Importer* importer = new Assimp::Importer();
+	const aiScene* scene = importer->ReadFile(modelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
+	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
+	{
+		aiMesh* mesh = scene->mMeshes[meshIndex];
+		for (int faceIndex = 0; faceIndex < mesh->mNumFaces; faceIndex++)
+		{
+			aiFace face = mesh->mFaces[faceIndex];
+			assert(face.mNumIndices == 3);
+			Triangle triangle;
+			triangle.a = getVertex(mesh, face.mIndices[0]);
+			triangle.b = getVertex(mesh, face.mIndices[1]);
+			triangle.c = getVertex(mesh, face.mIndices[2]);
+			ppm->addTriangleFillWithColor2(triangle, randomColor());
+		}
+	}
+	delete importer;
+}
+
+int main(int argc, char ** argv)
+{
+	spdlog::set_level(spdlog::level::trace);
+
+	const std::string appPath = argv[0];
+	const std::string appFolderPath = getFolder(appPath);
+	const std::string modelPath = std::string(appFolderPath).append("\\Resource\\obj\\african_head\\african_head.obj");
+
+	int width = 800;
+	int height = 800;
+
+	PPM ppm = PPM(width, height);
+
+	ppm.addLine({ -400, -400 }, { 0, 0 }, { 1, 1, 1 });
+	ppm.addTriangle( {0, 0}, {400, 0}, {400, 400} , { 1, 0, 0 });
+	ppm.addTriangleFillWithColor2(Triangle({ {-100,-100,1}, {1, 0, 0} }, { {0,-100,1}, {0, 1, 0} }, { {400,200,0}, {0, 0, 1} }));
+	ppm.addTriangleFillWithColor2(Triangle({ {-400,0,0.0}, {1, 0, 0} }, { {400,0,0.5}, {0, 1, 0} }, { {0,400,1}, {0, 0, 1} }));
+	drawModelPolygon(&ppm, modelPath);
+	drawModel(&ppm, modelPath);
+
+	ppm.writeToFile("image.ppm");
+	ppm.writeZBufferToFile("zbuffer.ppm");
 	return 0;
 }

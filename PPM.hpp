@@ -7,24 +7,38 @@
 #include <fstream>  
 #include <assert.h>
 
-struct Color
+#include "glm/glm.hpp"
+
+static glm::vec3 denormalColor(glm::vec3 color)
 {
-	unsigned char r = 0;
-	unsigned char g = 0;
-	unsigned char b = 0;
+	return glm::vec3(color.r * 255.0, color.g * 255.0, color.b * 255.0);
+}
+
+static double rangeMap(double v, double inputLower, double inputUpper, double outputLower, double outputUpper)
+{
+	return outputLower + ((outputUpper - outputLower) / (inputUpper - inputLower)) * (v - inputLower);
+}
+
+struct BarycentricTestResult
+{
+	bool isInsideTriangle;
+	double v;
+	double u;
+	double w;
 };
 
-struct Point
+struct Vertex
 {
-	float x = 0;
-	float y = 0;
-	Point(int x, int y)
-		:x(x), y(y)
+	glm::vec3 point = { 0,0,0 };
+	glm::vec3 color = { 0,0,0 };
+
+	Vertex()
 	{
 
 	}
-	Point(float x, float y)
-		:x(x), y(y)
+
+	Vertex(glm::vec3 point, glm::vec3 color)
+		:point(point), color(color)
 	{
 
 	}
@@ -32,37 +46,54 @@ struct Point
 
 struct Triangle
 {
-	Point a{ 0, 0 };
-	Point b{ 0, 0 };
-	Point c{ 0, 0 };
+	Vertex a;
+	Vertex b;
+	Vertex c;
+	Triangle()
+	{
+
+	}
+	Triangle(Vertex a, Vertex b, Vertex c)
+		:a(a), b(b), c(c)
+	{
+
+	}
 };
 
 struct Line2D
 {
-	Point p0;
-	Point p1;
+	glm::vec2 p0;
+	glm::vec2 p1;
 
-	float a = 0;
-	float b = 0;
+	double a = 0;
+	double b = 0;
 
-	Line2D(Point p0, Point p1)
+	Line2D(glm::vec2 p0, glm::vec2 p1)
 		:p0(p0), p1(p1)
 	{
 		a = (p1.y - p0.y) / (p1.x - p0.x);
 		b = p0.y - a * p0.x;
 	}
 
-	float x(float y) {
+	double x(double y) {
 		assert(a != 0.0);
-		float x = (y - b) / a;
+		double x = (y - b) / a;
 		return x;
 	}
 
-	float y(float x) {
-		float y = a * x + b;
+	double y(double x) {
+		double y = a * x + b;
 		return y;
 	}
 
+};
+
+struct Rect
+{
+	double x;
+	double y;
+	double width;
+	double height;
 };
 
 class PPM
@@ -72,12 +103,20 @@ public:
 	PPM(int width, int height);
 	~PPM();
 
+	void reset();
 	void writePPMFileHeader(std::ofstream* f);
 	void writeToFile(std::string filename);
-	void setColor(Point point, Color p);
-	void addLine(Point p0, Point p1, Color color);
-	void addTriangle(Triangle triangle, Color color);
-	void addTriangleFillWithColor(Triangle triangle, Color color);
+	void writeZBufferToFile(std::string filename);
+	int pointToIndex(glm::vec3 point, bool isEnableDepthTest);
+	void setColor(glm::vec3 point, glm::vec3 color, bool isEnableDepthTest);
+	void addLine(glm::vec2 p0, glm::vec2 p1, glm::vec3 color);
+	void addTriangle(glm::vec2 a, glm::vec2 b, glm::vec2 c, glm::vec3 color);
+	void addTriangleFillWithColor(glm::vec2 a, glm::vec2 b, glm::vec2 c, glm::vec3 color);
+	Rect boundingBox(glm::vec2 a, glm::vec2 b, glm::vec2 c);
+	BarycentricTestResult barycentricTest(glm::vec2 a, glm::vec2 b, glm::vec2 c, double x, double y);
+	Vertex interpolation(BarycentricTestResult testResult, Triangle triangle);
+	void addTriangleFillWithColor2(Triangle triangle);
+	void addTriangleFillWithColor2(Triangle triangle, glm::vec3 color);
 
 public:
 	int width = 0;
@@ -86,4 +125,6 @@ public:
 	unsigned char* r = nullptr;
 	unsigned char* g = nullptr;
 	unsigned char* b = nullptr;
+
+	double* zBuffer = nullptr;
 };
