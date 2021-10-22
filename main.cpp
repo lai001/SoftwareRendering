@@ -4,82 +4,57 @@
 #include <numeric>
 #include <random>
 
+#include "glad/glad.h"
+#include "GLFW/glfw3.h"
+#include "glm/glm.hpp"
+#include "glm/ext.hpp"
 #include "assimp/Importer.hpp" 
 #include "assimp/postprocess.h"
 #include "assimp/scene.h"
 #include "spdlog/spdlog.h"
 
 #include "PPM.hpp"
+#include "Util.hpp"
+#include "Renderer.hpp"
+#include "Camera.hpp"
 
-glm::vec3 randomColor()
+struct GlobalResource
 {
-	std::function<double()> randomDoubleValue = []() {
-		std::random_device rd;
-		std::uniform_int_distribution<int> dist(0, 255);
-		return dist(rd) / 255.0;
-	};
+	const std::string appPath;
+	const std::string appFolderPath = getFolder(appPath);
+	const std::string modelPath = std::string(appFolderPath).append("\\Resource\\obj\\african_head\\african_head.obj");
+	const std::string boxModelPath = std::string(appFolderPath).append("\\Resource\\box.dae");
 
-	glm::vec3 color;
-	color.r = randomDoubleValue();
-	color.g = randomDoubleValue();
-	color.b = randomDoubleValue();
-	return color;
-}
+	const GLFWwindow* window = nullptr;
+	Renderer* renderer = nullptr;
 
-std::string getFolder(std::string filename)
-{
-	std::string directory;
-	const size_t last_slash_idx = filename.rfind('\\');
-	if (std::string::npos != last_slash_idx)
+	Assimp::Importer* boxImporter = nullptr;
+	const aiScene* boxScene = nullptr;
+
+	Assimp::Importer* modeImporter = nullptr;
+	const aiScene* modelScene = nullptr;
+
+	GlobalResource(int argc, char ** argv)
+		:appPath(argv[0])
 	{
-		directory = filename.substr(0, last_slash_idx);
+		boxImporter = new Assimp::Importer();
+		boxScene = boxImporter->ReadFile(boxModelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
+		modeImporter = new Assimp::Importer();
+		modelScene = modeImporter->ReadFile(modelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
 	}
-	return directory;
-}
+};
 
-void drawModelPolygon(PPM* ppm, std::string modelPath)
+GlobalResource* globalResource = nullptr;
+
+void drawModel()
 {
-	std::function<glm::vec2(aiMesh*, unsigned int)> getPoint = [ppm](aiMesh* mesh, unsigned int index) {
+	const Renderer* renderer = globalResource->renderer;
+	std::function<glm::vec2(aiMesh*, unsigned int)> getVertex = [renderer](aiMesh* mesh, unsigned int index) {
 		aiVector3D vertex = mesh->mVertices[index];
-		return glm::vec2(vertex.x*ppm->width / 2.0, vertex.y*ppm->height / 2.0);
+		return glm::vec2(vertex.x, vertex.y);
 	};
 
-	float width = ppm->width;
-	float height = ppm->height;
-
-	Assimp::Importer* importer = new Assimp::Importer();
-	const aiScene* scene = importer->ReadFile(modelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
-	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
-	{
-		aiMesh* mesh = scene->mMeshes[meshIndex];
-		for (int faceIndex = 0; faceIndex < mesh->mNumFaces; faceIndex++)
-		{
-			aiFace face = mesh->mFaces[faceIndex];
-			for (int vertexIndex = 0; vertexIndex < face.mNumIndices; vertexIndex++)
-			{
-				unsigned int index = face.mIndices[vertexIndex];
-				unsigned int nextIndex = face.mIndices[(vertexIndex + 1) % face.mNumIndices];
-				glm::vec2 p0 = getPoint(mesh, index);
-				glm::vec2 p1 = getPoint(mesh, nextIndex);;
-				ppm->addLine(p0, p1, {1, 0, 0});
-			}
-		}
-	}
-	delete importer;
-}
-
-void drawModel(PPM* ppm, std::string modelPath)
-{
-	std::function<Vertex(aiMesh*, unsigned int)> getVertex = [ppm](aiMesh* mesh, unsigned int index) {
-		aiVector3D vertex = mesh->mVertices[index];
-		double z = rangeMap(vertex.z, -1, 1, 0, 1);
-		z = 1 - z;
-		Vertex v = Vertex({ vertex.x*ppm->width / 2.0, vertex.y*ppm->height / 2.0, z }, { 1, 0, 0 });
-		return v;
-	};
-
-	Assimp::Importer* importer = new Assimp::Importer();
-	const aiScene* scene = importer->ReadFile(modelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
+	const aiScene* scene = globalResource->modelScene;
 	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
 	{
 		aiMesh* mesh = scene->mMeshes[meshIndex];
@@ -87,37 +62,228 @@ void drawModel(PPM* ppm, std::string modelPath)
 		{
 			aiFace face = mesh->mFaces[faceIndex];
 			assert(face.mNumIndices == 3);
-			Triangle triangle;
-			triangle.a = getVertex(mesh, face.mIndices[0]);
-			triangle.b = getVertex(mesh, face.mIndices[1]);
-			triangle.c = getVertex(mesh, face.mIndices[2]);
-			ppm->addTriangleFillWithColor2(triangle, randomColor());
+			const glm::vec2 a = getVertex(mesh, face.mIndices[0]);
+			const glm::vec2 b = getVertex(mesh, face.mIndices[1]);
+			const glm::vec2 c = getVertex(mesh, face.mIndices[2]);
+			const glm::vec3 color0 = randomColor();
+			const glm::vec3 color1 = randomColor();
+			const glm::vec3 color2 = randomColor();
+			renderer->addTriangle2D(a, b, c, color0, color1, color2);
 		}
 	}
-	delete importer;
+}
+
+void drawModelPolygon()
+{
+	const Renderer* renderer = globalResource->renderer;
+
+	std::function<glm::vec2(aiMesh*, unsigned int)> getVertex = [renderer](aiMesh* mesh, unsigned int index) {
+		aiVector3D vertex = mesh->mVertices[index];
+		return glm::vec2(vertex.x, vertex.y);
+	};
+
+	const aiScene* scene = globalResource->modelScene;
+	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
+	{
+		aiMesh* mesh = scene->mMeshes[meshIndex];
+		for (int faceIndex = 0; faceIndex < mesh->mNumFaces; faceIndex++)
+		{
+			aiFace face = mesh->mFaces[faceIndex];
+			assert(face.mNumIndices == 3);
+			const glm::vec2 a = getVertex(mesh, face.mIndices[0]);
+			const glm::vec2 b = getVertex(mesh, face.mIndices[1]);
+			const glm::vec2 c = getVertex(mesh, face.mIndices[2]);
+			const glm::vec3 color0 = randomColor();
+			renderer->addTriangle2D(a, b, c, color0, PolygonModeType::line);
+		}
+	}
+}
+
+void drawModel2()
+{
+	const Renderer* renderer = globalResource->renderer;
+
+	std::function<glm::vec3(aiMesh*, unsigned int)> getVertex = [renderer](aiMesh* mesh, unsigned int index) {
+		const aiVector3D vertex = mesh->mVertices[index];
+		double z = rangeMap(vertex.z, -1, 1, 0, 1);
+		z = 1 - z;
+		return glm::vec3(vertex.x, vertex.y, z);
+	};
+
+	const aiScene* scene = globalResource->modelScene;
+	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
+	{
+		aiMesh* mesh = scene->mMeshes[meshIndex];
+		for (int faceIndex = 0; faceIndex < mesh->mNumFaces; faceIndex++)
+		{
+			aiFace face = mesh->mFaces[faceIndex];
+			assert(face.mNumIndices == 3);
+			const glm::vec3 a = getVertex(mesh, face.mIndices[0]);
+			const glm::vec3 b = getVertex(mesh, face.mIndices[1]);
+			const glm::vec3 c = getVertex(mesh, face.mIndices[2]);
+			const glm::vec3 color0 = randomColor();
+			const glm::vec3 color1 = randomColor();
+			const glm::vec3 color2 = randomColor();
+			renderer->addTriangle3D(a, b, c, color0, color1, color2, DepthFunc::less);
+		}
+	}
+}
+
+void drawModel3(const double time)
+{
+	const Renderer* renderer = globalResource->renderer;
+
+	FCamera camera = FCamera(renderer->getWidth(), renderer->getHeight());
+
+	camera.MoveUp(3.0);
+	camera.MoveLeft(3.0);
+	camera.MoveBack(1.0);
+
+	glm::mat4x4 modelMat(1.0f);
+
+	glm::mat4x4 scaleMat = glm::scale(glm::mat4x4(1.0), glm::vec3(1.0f, 1.0f, 1.0f));
+	glm::mat4x4 translateMat = glm::translate(glm::mat4x4(1.0), glm::vec3(0.0f, 0.0, 10.0));
+	glm::mat4x4 rotateMat = glm::rotate(glm::mat4x4(1.0), glm::radians(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+	modelMat = translateMat * rotateMat * scaleMat;
+
+	glm::mat4x4 viewMat = camera.GetViewMat();
+	glm::mat4x4 projectionMat = camera.GetprojectionMat();
+	glm::mat4x4 mvpMat = projectionMat * viewMat * modelMat;
+
+	std::function<glm::vec4(aiMesh*, unsigned int)> getVertex = [renderer](aiMesh* mesh, unsigned int index) {
+		const aiVector3D vertex = mesh->mVertices[index];
+		return glm::vec4(vertex.x, vertex.y, vertex.z, 1.0);
+	};
+
+	const aiScene* scene = globalResource->boxScene;
+
+	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
+	{
+		aiMesh* mesh = scene->mMeshes[meshIndex];
+		aiMaterial* mMaterial = scene->mMaterials[mesh->mMaterialIndex];
+		aiColor4D diffuseColor;
+		aiReturn ret = mMaterial->Get(AI_MATKEY_COLOR_DIFFUSE, diffuseColor);
+
+		for (int faceIndex = 0; faceIndex < mesh->mNumFaces; faceIndex++)
+		{
+			aiFace face = mesh->mFaces[faceIndex];
+			assert(face.mNumIndices == 3);
+			const glm::vec4 a = getVertex(mesh, face.mIndices[0]);
+			const glm::vec4 b = getVertex(mesh, face.mIndices[1]);
+			const glm::vec4 c = getVertex(mesh, face.mIndices[2]);
+
+			const glm::vec3 color0 = glm::vec3(diffuseColor.r, diffuseColor.g, diffuseColor.b);
+			const glm::vec3 color1 = color0;
+			const glm::vec3 color2 = color0;
+
+			const glm::vec4 p0 = mvpMat * a;
+			const glm::vec4 p1 = mvpMat * b;
+			const glm::vec4 p2 = mvpMat * c;
+
+			renderer->addTriangle3D(p0, p1, p2, color0, color1, color2, DepthFunc::less);
+		}
+	}
+}
+
+void glRenderLoop()
+{
+	drawModel3(glfwGetTime());
+}
+
+void initGL()
+{
+	const Renderer* renderer = globalResource->renderer;
+
+	glfwInit();
+
+	GLFWwindow* window = glfwCreateWindow(renderer->getWidth(), renderer->getHeight(), "SoftwareRendering", NULL, NULL);
+	globalResource->window = window;
+	if (window == NULL)
+	{
+		__debugbreak();
+		glfwTerminate();
+	}
+	glfwMakeContextCurrent(window);
+	//glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
+	//glfwSetScrollCallback(window, scrollCallback);
+
+	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+	{
+		__debugbreak();
+	}
+
+	while (!glfwWindowShouldClose(window))
+	{
+		renderer->flush();
+		glRenderLoop();
+		const void* data = renderer->getFrameBuffer()->getData();
+		glDrawPixels(renderer->getWidth(), renderer->getHeight(), GL_RGB, GL_UNSIGNED_BYTE, data);
+		glfwSwapBuffers(window);
+		glfwPollEvents();
+	}
+}
+
+void write()
+{
+	Renderer& renderer = *globalResource->renderer;
+	{
+		renderer.setColor(glm::vec3(-1.0, 1.0, 0), glm::vec3(1, 0, 0), DepthFunc::always);
+		renderer.setColor(glm::vec3(1.0, 1.0, 0), glm::vec3(1, 0, 0), DepthFunc::always);
+		renderer.setColor(glm::vec3(-1.0, -1.0, 0), glm::vec3(1, 0, 0), DepthFunc::always);
+		renderer.setColor(glm::vec3(1.0, -1.0, 0), glm::vec3(1, 0, 0), DepthFunc::always);
+
+		renderer.addLine2D(glm::vec2(0.0, 0.0), glm::vec2(1.0, 1.0), Color::white);
+
+		renderer.addTriangle2D(glm::vec2(-0.9, 0.9), glm::vec2(0.0, 0.87), glm::vec2(-0.9, -0.9), Color::red, PolygonModeType::line);
+		renderer.addTriangle2D(glm::vec2(-1.0, 0.5), glm::vec2(-1.0, 0.6), glm::vec2(-0.9, -0.8), Color::yellow, PolygonModeType::fill);
+		renderer.addTriangle2D(glm::vec2(0.0, 0.0), glm::vec2(1.0, 0.0), glm::vec2(0.0, 1.0),
+			Color::gree, Color::red, Color::blue);
+		PPM::writePxielsToFile(*renderer.getFrameBuffer(), "Image.ppm");
+	}
+
+	{
+		renderer.flush();
+		drawModel();
+		PPM::writePxielsToFile(*renderer.getFrameBuffer(), "Model.ppm");
+	}
+
+	{
+		renderer.flush();
+		drawModelPolygon();
+		PPM::writePxielsToFile(*renderer.getFrameBuffer(), "ModelPolygon.ppm");
+	}
+
+	{
+		renderer.flush();
+		drawModel2();
+		PPM::writePxielsToFile(*renderer.getFrameBuffer(), "Model2.ppm");
+		PPM::writeZBufferToFile(*renderer.getFrameBuffer(), "zBuffer.ppm");
+	}
+
+	{
+		renderer.flush();
+		const glm::vec3 a = glm::vec3(0.0, 0.0, 0.0);
+		const glm::vec3 b = glm::vec3(1.0, 0.0, 0.0);
+		const glm::vec3 c = glm::vec3(0.0, 1.0, 0.0);
+		const glm::vec3 color0 = Color::red;
+		const glm::vec3 color1 = Color::gree;
+		const glm::vec3 color2 = Color::blue;
+		renderer.addTriangle3D(a, b, c, color0, color1, color2, DepthFunc::less);
+		PPM::writePxielsToFile(*renderer.getFrameBuffer(), "Triangle.ppm");
+	}
 }
 
 int main(int argc, char ** argv)
 {
 	spdlog::set_level(spdlog::level::trace);
 
-	const std::string appPath = argv[0];
-	const std::string appFolderPath = getFolder(appPath);
-	const std::string modelPath = std::string(appFolderPath).append("\\Resource\\obj\\african_head\\african_head.obj");
+	globalResource = new GlobalResource(argc, argv);
+	globalResource->renderer = new Renderer(800, 800);
 
-	int width = 800;
-	int height = 800;
+	//write();
 
-	PPM ppm = PPM(width, height);
+	initGL();
 
-	ppm.addLine({ -400, -400 }, { 0, 0 }, { 1, 1, 1 });
-	ppm.addTriangle( {0, 0}, {400, 0}, {400, 400} , { 1, 0, 0 });
-	ppm.addTriangleFillWithColor2(Triangle({ {-100,-100,1}, {1, 0, 0} }, { {0,-100,1}, {0, 1, 0} }, { {400,200,0}, {0, 0, 1} }));
-	ppm.addTriangleFillWithColor2(Triangle({ {-400,0,0.0}, {1, 0, 0} }, { {400,0,0.5}, {0, 1, 0} }, { {0,400,1}, {0, 0, 1} }));
-	drawModelPolygon(&ppm, modelPath);
-	drawModel(&ppm, modelPath);
-
-	ppm.writeToFile("image.ppm");
-	ppm.writeZBufferToFile("zbuffer.ppm");
 	return 0;
 }
