@@ -285,6 +285,53 @@ void Renderer::addTriangle3D(const glm::vec4 p0, const glm::vec4 p1, const glm::
 	}
 }
 
+void Renderer::pipeline(const RenderPipeline& renderPipeLine)
+{
+	int triangleCount = renderPipeLine.triangleCount;
+
+	for (int i = 0; i < triangleCount; i++)
+	{
+		const RasterizationData data0 = renderPipeLine.shader->vertexShader(renderPipeLine.vertexBuffer, 3 * i + 0);
+		const RasterizationData data1 = renderPipeLine.shader->vertexShader(renderPipeLine.vertexBuffer, 3 * i + 1);
+		const RasterizationData data2 = renderPipeLine.shader->vertexShader(renderPipeLine.vertexBuffer, 3 * i + 2);
+		assert(data0.extraData.size() == data1.extraData.size() == data2.extraData.size());
+		glm::vec4 a = divideByW(data0.position);
+		glm::vec4 b = divideByW(data1.position);
+		glm::vec4 c = divideByW(data2.position);
+
+		if (isValidTriangle(a, b, c) == false)
+		{
+			continue;
+		}
+		Rect box = Rect::boundingBox(a, b, c);
+
+		for (double y = box.y; y <= box.y + box.height; y += (double)1.0 / (double)getHeight())
+		{
+			for (double x = box.x; x <= box.x + box.width; x += (double)1.0 / (double)getWidth())
+			{
+				BarycentricTestResult testResult = BarycentricTestResult::test(a, b, c, x, y);
+				if (testResult.isInsideTriangle)
+				{
+					glm::vec3 interpolationP = interpolation(testResult.weight(), glm::vec3(a), glm::vec3(b), glm::vec3(c));
+					const glm::vec3 point = vec3Correction(a, b, c, data0.position.z, data1.position.z, data2.position.z, testResult);
+
+					RasterizationData data;
+					data.position = glm::vec4(interpolationP, 1.0);
+					for (int i = 0; i < data0.extraData.size(); i++)
+					{
+						glm::vec4 interpolationData = interpolation(testResult.weight(), data0.extraData[i], data1.extraData[i], data2.extraData[i]);
+						interpolationData = vec4Correction(data0.extraData[i], data1.extraData[i], data2.extraData[i], data0.position.z, data1.position.z, data2.position.z, testResult);
+						data.extraData.push_back(interpolationData);
+					}
+					glm::vec4 color = renderPipeLine.shader->fragmentShader(data);
+
+					setColor(point, color, renderPipeLine.depthFunc);
+				}
+			}
+		}
+	}
+}
+
 bool Renderer::isValidTriangle(const glm::vec2 a, const glm::vec2 b, const glm::vec2 c) const
 {
 	double d0 = glm::distance(a, b);

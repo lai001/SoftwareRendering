@@ -69,6 +69,16 @@ static double interpolation(const glm::vec3 weight, const glm::vec3 value)
 	return weight.x * value.x + weight.y * value.y + weight.z * value.z;
 }
 
+static glm::vec4 interpolation(const glm::vec3 weight, const glm::vec4 v0, const glm::vec4 v1, const glm::vec4 v2)
+{
+	glm::vec4 value;
+	value.x = interpolation(weight, glm::vec3(v0.x, v1.x, v2.x));
+	value.y = interpolation(weight, glm::vec3(v0.y, v1.y, v2.y));
+	value.z = interpolation(weight, glm::vec3(v0.z, v1.z, v2.z));
+	value.w = interpolation(weight, glm::vec3(v0.w, v1.w, v2.w));
+	return value;
+}
+
 static glm::vec3 interpolation(const glm::vec3 weight, const glm::vec3 v0, const glm::vec3 v1, const glm::vec3 v2)
 {
 	glm::vec3 value;
@@ -85,6 +95,32 @@ static glm::vec2 interpolation(const glm::vec3 weight, const glm::vec2 v0, const
 	value.y = interpolation(weight, glm::vec3(v0.y, v1.y, v2.y));
 	//value.z = 0;
 	return value;
+}
+
+static glm::vec4 vec4Correction(const glm::vec4 c0, const glm::vec4 c1, const glm::vec4 c2,
+	const double z0, const double z1, const double z2,
+	const BarycentricTestResult testResultAtScreenSapce)
+{
+	if (z0 == z1 && z1 == z2)
+	{
+		glm::vec3 weightAtScreenSapce = testResultAtScreenSapce.weight();
+		const double x = glm::dot(glm::vec3(c0.x, c1.x, c2.x), weightAtScreenSapce);
+		const double y = glm::dot(glm::vec3(c0.y, c1.y, c2.y), weightAtScreenSapce);
+		const double z = glm::dot(glm::vec3(c0.z, c1.z, c2.z), weightAtScreenSapce);
+		const double w = glm::dot(glm::vec3(c0.w, c1.w, c2.w), weightAtScreenSapce);
+		return glm::vec4(x, y, z, w);
+	}
+	const double zAtWorldSpace = 1.0 / ((testResultAtScreenSapce.w1 / z0) + (testResultAtScreenSapce.w2 / z1) + (testResultAtScreenSapce.w3 / z2));
+	BarycentricTestResult testResultAtWorldSpace;
+	testResultAtWorldSpace.w1 = zAtWorldSpace * testResultAtScreenSapce.w1 / z0;
+	testResultAtWorldSpace.w2 = zAtWorldSpace * testResultAtScreenSapce.w2 / z1;
+	testResultAtWorldSpace.w3 = zAtWorldSpace * testResultAtScreenSapce.w3 / z2;
+	glm::vec3 weightAtWorldSpace = testResultAtWorldSpace.weight();
+	const double x = glm::dot(glm::vec3(c0.x, c1.x, c2.x), weightAtWorldSpace);
+	const double y = glm::dot(glm::vec3(c0.y, c1.y, c2.y), weightAtWorldSpace);
+	const double z = glm::dot(glm::vec3(c0.z, c1.z, c2.z), weightAtWorldSpace);
+	const double w = glm::dot(glm::vec3(c0.w, c1.w, c2.w), weightAtWorldSpace);
+	return glm::vec4(x, y, z, w);
 }
 
 static glm::vec3 vec3Correction(const glm::vec3 c0, const glm::vec3 c1, const glm::vec3 c2, 

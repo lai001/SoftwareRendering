@@ -17,6 +17,8 @@
 #include "Util.hpp"
 #include "Renderer.hpp"
 #include "Camera.hpp"
+#include "ModelShader.hpp"
+#include "RenderPipeLine.hpp"
 
 struct GlobalResource
 {
@@ -129,7 +131,7 @@ void drawModel2()
 	}
 }
 
-void drawModel3(const double time)
+void drawModel3(const float time)
 {
 	const Renderer* renderer = globalResource->renderer;
 
@@ -186,9 +188,88 @@ void drawModel3(const double time)
 	}
 }
 
+void testPipeLine(const float time)
+{
+	Renderer* renderer = globalResource->renderer;
+
+	FCamera camera = FCamera(renderer->getWidth(), renderer->getHeight());
+
+	camera.MoveUp(3.0);
+	camera.MoveLeft(3.0);
+	camera.MoveBack(1.0);
+
+	glm::mat4x4 modelMat(1.0f);
+
+	glm::mat4x4 scaleMat = glm::scale(glm::mat4x4(1.0), glm::vec3(1.0f, 1.0f, 1.0f));
+	glm::mat4x4 translateMat = glm::translate(glm::mat4x4(1.0), glm::vec3(0.0f, 0.0, 5.0));
+	glm::mat4x4 rotateMat = glm::rotate(glm::mat4x4(1.0), glm::radians(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+	modelMat = translateMat * rotateMat * scaleMat;
+
+	glm::mat4x4 viewMat = camera.GetViewMat();
+	glm::mat4x4 projectionMat = camera.GetprojectionMat();
+	//glm::mat4x4 mvpMat = projectionMat * viewMat * modelMat;
+
+	std::function<glm::vec3(aiMesh*, unsigned int)> getVertex = [renderer](aiMesh* mesh, unsigned int index) {
+		const aiVector3D vertex = mesh->mVertices[index];
+		return glm::vec3(vertex.x, vertex.y, vertex.z);
+	};
+
+	const aiScene* scene = globalResource->boxScene;
+	ModelShader shader;
+	shader.modelMat = modelMat;
+	shader.viewMat = viewMat;
+	shader.projectionMat = projectionMat;
+	RenderPipeline pipeline;
+	pipeline.shader = &shader;
+	std::vector<BaseVertex> vertexBuffer;
+	
+	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
+	{
+		aiMesh* mesh = scene->mMeshes[meshIndex];
+		aiMaterial* mMaterial = scene->mMaterials[mesh->mMaterialIndex];
+		aiColor4D diffuseColor;
+		aiReturn ret = mMaterial->Get(AI_MATKEY_COLOR_DIFFUSE, diffuseColor);
+
+		for (int faceIndex = 0; faceIndex < mesh->mNumFaces; faceIndex++)
+		{
+			aiFace face = mesh->mFaces[faceIndex];
+			assert(face.mNumIndices == 3);
+			const glm::vec3 a = getVertex(mesh, face.mIndices[0]);
+			const glm::vec3 b = getVertex(mesh, face.mIndices[1]);
+			const glm::vec3 c = getVertex(mesh, face.mIndices[2]);
+			
+			const glm::vec3 color0 = glm::vec3(diffuseColor.r, diffuseColor.g, diffuseColor.b);
+			const glm::vec3 color1 = color0;
+			const glm::vec3 color2 = color0;
+
+			BaseVertex vertex0;
+			vertex0.color = color0;
+			vertex0.position = a;
+			vertexBuffer.push_back(vertex0);
+
+			BaseVertex vertex1;
+			vertex1.color = color1;
+			vertex1.position = b;
+			vertexBuffer.push_back(vertex1);
+
+			BaseVertex vertex2;
+			vertex2.color = color2;
+			vertex2.position = c;
+			vertexBuffer.push_back(vertex2);
+		}
+	}
+	
+	pipeline.vertexBuffer = static_cast<void*>(vertexBuffer.data());
+	pipeline.triangleCount = vertexBuffer.size() / 3;
+
+	renderer->pipeline(pipeline);
+}
+
 void glRenderLoop()
 {
-	drawModel3(glfwGetTime());
+	//drawModel3(glfwGetTime());
+	testPipeLine(glfwGetTime());
 }
 
 void initGL()
