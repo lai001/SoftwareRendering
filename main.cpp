@@ -19,6 +19,8 @@
 #include "Camera.hpp"
 #include "ModelShader.hpp"
 #include "RenderPipeLine.hpp"
+#include "Texture2D.hpp"
+#include "ImageShader.hpp"
 
 struct GlobalResource
 {
@@ -26,7 +28,8 @@ struct GlobalResource
 	const std::string appFolderPath = getFolder(appPath);
 	const std::string modelPath = std::string(appFolderPath).append("\\Resource\\obj\\african_head\\african_head.obj");
 	const std::string boxModelPath = std::string(appFolderPath).append("\\Resource\\box.dae");
-
+	const std::string testImagePath = std::string(appFolderPath).append("\\Resource\\test0.jpg");
+	
 	const GLFWwindow* window = nullptr;
 	Renderer* renderer = nullptr;
 
@@ -36,6 +39,8 @@ struct GlobalResource
 	Assimp::Importer* modeImporter = nullptr;
 	const aiScene* modelScene = nullptr;
 
+	Texture2D* texture = nullptr;
+
 	GlobalResource(int argc, char ** argv)
 		:appPath(argv[0])
 	{
@@ -43,6 +48,7 @@ struct GlobalResource
 		boxScene = boxImporter->ReadFile(boxModelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
 		modeImporter = new Assimp::Importer();
 		modelScene = modeImporter->ReadFile(modelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
+		texture = new Texture2D(testImagePath);
 	}
 };
 
@@ -188,6 +194,31 @@ void drawModel3(const float time)
 	}
 }
 
+void drawImage()
+{
+	Renderer* renderer = globalResource->renderer;
+	ImageShader shader;
+	shader.texture = globalResource->texture;
+	RenderPipeline pipeline;
+	pipeline.depthFunc = DepthFunc::lequal;
+	pipeline.shader = &shader;
+	std::vector<ImageShaderVertex> vertexBuffer;
+	float length = 0.5;
+	ImageShaderVertex a = ImageShaderVertex(glm::vec2(-length, length), glm::vec2(0.0f, 0.0f));
+	ImageShaderVertex b = ImageShaderVertex(glm::vec2(length, length), glm::vec2(1.0f, 0.0f));
+	ImageShaderVertex c = ImageShaderVertex(glm::vec2(-length, -length), glm::vec2(0.0f, 1.0f));
+
+	ImageShaderVertex d = b;
+	ImageShaderVertex e = ImageShaderVertex(glm::vec2(length, -length), glm::vec2(1.0f, 1.0f));
+	ImageShaderVertex f = c;
+	vertexBuffer.insert(vertexBuffer.end(), {a,b,c,d,e,f});
+
+	pipeline.vertexBuffer = static_cast<void*>(vertexBuffer.data());
+	pipeline.triangleCount = vertexBuffer.size() / 3;
+
+	renderer->pipeline(pipeline);
+}
+
 void testPipeLine(const float time)
 {
 	Renderer* renderer = globalResource->renderer;
@@ -195,14 +226,14 @@ void testPipeLine(const float time)
 	FCamera camera = FCamera(renderer->getWidth(), renderer->getHeight());
 
 	camera.MoveUp(3.0);
-	camera.MoveLeft(3.0);
-	camera.MoveBack(1.0);
+	camera.MoveLeft(2.0);
+	camera.MoveBack(5.0);
 
 	glm::mat4x4 modelMat(1.0f);
 
 	glm::mat4x4 scaleMat = glm::scale(glm::mat4x4(1.0), glm::vec3(1.0f, 1.0f, 1.0f));
 	glm::mat4x4 translateMat = glm::translate(glm::mat4x4(1.0), glm::vec3(0.0f, 0.0, 5.0));
-	glm::mat4x4 rotateMat = glm::rotate(glm::mat4x4(1.0), glm::radians(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	glm::mat4x4 rotateMat = glm::rotate(glm::mat4x4(1.0), glm::radians(time * 5.0f), glm::vec3(1.0f, 1.0f, 1.0f));
 
 	modelMat = translateMat * rotateMat * scaleMat;
 
@@ -268,8 +299,9 @@ void testPipeLine(const float time)
 
 void glRenderLoop()
 {
-	//drawModel3(glfwGetTime());
+	drawModel3(glfwGetTime());
 	testPipeLine(glfwGetTime());
+	drawImage();
 }
 
 void initGL()
@@ -299,7 +331,14 @@ void initGL()
 		renderer->flush();
 		glRenderLoop();
 		const void* data = renderer->getFrameBuffer()->getData();
-		glDrawPixels(renderer->getWidth(), renderer->getHeight(), GL_RGB, GL_UNSIGNED_BYTE, data);
+		int width = renderer->getWidth();
+		int height = renderer->getHeight();
+		int length = width * height;
+		void* copyImageData = new unsigned char[length * 3];
+		memcpy(copyImageData, renderer->getFrameBuffer()->getData(), length * 3);
+		stbi__vertical_flip(copyImageData, width, height, 3);
+		glDrawPixels(width, height, GL_RGB, GL_UNSIGNED_BYTE, copyImageData);
+		delete copyImageData;
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 	}

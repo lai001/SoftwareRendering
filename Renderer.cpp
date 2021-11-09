@@ -314,7 +314,7 @@ void Renderer::pipeline(const RenderPipeline& renderPipeLine)
 				{
 					glm::vec3 interpolationP = interpolation(testResult.weight(), glm::vec3(a), glm::vec3(b), glm::vec3(c));
 					const glm::vec3 point = vec3Correction(a, b, c, data0.position.z, data1.position.z, data2.position.z, testResult);
-
+					float zAtScreenSapce = zCorrection(a.z, b.z, c.z, data0.position.z, data1.position.z, data2.position.z, testResult);
 					RasterizationData data;
 					data.position = glm::vec4(interpolationP, 1.0);
 					for (int i = 0; i < data0.extraData.size(); i++)
@@ -324,8 +324,7 @@ void Renderer::pipeline(const RenderPipeline& renderPipeLine)
 						data.extraData.push_back(interpolationData);
 					}
 					glm::vec4 color = renderPipeLine.shader->fragmentShader(data);
-
-					setColor(point, color, renderPipeLine.depthFunc);
+					setColor(glm::vec3(point.x, point.y, zAtScreenSapce), color, renderPipeLine.depthFunc);
 				}
 			}
 		}

@@ -100,7 +100,7 @@ void FCamera::MoveRight(float Units)
 
 void FCamera::MoveUp(float Units)
 {
-	CameraPos -= glm::normalize(CameraUp) * CameraSpeed * Units;
+	CameraPos += glm::normalize(CameraUp) * CameraSpeed * Units;
 	View = glm::lookAt(CameraPos, CameraPos + CameraFront, CameraUp);
 }
 

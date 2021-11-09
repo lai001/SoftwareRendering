@@ -8,10 +8,17 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT $
 include_directories("./")
 include_directories("Vendor")
 include_directories("Vendor/glad/include")
+include_directories("Vendor/stb_image")
 aux_source_directory("./" SRC)
 file(GLOB HEADERS *.hpp)
+set(HEADERS ${HEADERS}
+"Vendor/glad/include/glad/glad.h"
+"Vendor/stb_image/stb_image.h")
+set(SRC ${SRC} 
+"Vendor/glad/src/glad.c"
+"Vendor/stb_image/stb_image.cpp")
 
-add_executable(${PROJECT_NAME} Vendor/glad/include/glad/glad.h Vendor/glad/src/glad.c ${SRC} ${HEADERS})
+add_executable(${PROJECT_NAME} ${SRC} ${HEADERS})
 
 add_subdirectory(Vendor/assimp)
 target_link_libraries(${PROJECT_NAME} PRIVATE assimp)

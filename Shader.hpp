@@ -13,6 +13,6 @@ struct RasterizationData
 class Shader
 {
 public:
-	virtual RasterizationData vertexShader(const void* vertex, const int vertexIdx) = 0;
+	virtual RasterizationData vertexShader(const void* vertexBuffer, const int vertexIdx) = 0;
 	virtual glm::vec4 fragmentShader(const RasterizationData& rasterizationData) = 0;
 };

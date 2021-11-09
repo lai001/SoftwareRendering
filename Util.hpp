@@ -3,6 +3,7 @@
 #include <functional>
 
 #include "glm/glm.hpp"
+#include "stb_image.h"
 
 #include "BarycentricTestResult.hpp"
 
@@ -147,6 +148,26 @@ static glm::vec3 vec3Correction(const glm::vec3 c0, const glm::vec3 c1, const gl
 	return glm::vec3(x, y, z);
 }
 
+static float zCorrection(const float c0, const float c1, const float c2,
+	const double z0, const double z1, const double z2,
+	const BarycentricTestResult testResultAtScreenSapce)
+{
+	if (z0 == z1 && z1 == z2)
+	{
+		glm::vec3 weightAtScreenSapce = testResultAtScreenSapce.weight();
+		const double z = c0;
+		return z;
+	}
+	const double zAtWorldSpace = 1.0 / ((testResultAtScreenSapce.w1 / z0) + (testResultAtScreenSapce.w2 / z1) + (testResultAtScreenSapce.w3 / z2));
+	BarycentricTestResult testResultAtWorldSpace;
+	testResultAtWorldSpace.w1 = zAtWorldSpace * testResultAtScreenSapce.w1 / z0;
+	testResultAtWorldSpace.w2 = zAtWorldSpace * testResultAtScreenSapce.w2 / z1;
+	testResultAtWorldSpace.w3 = zAtWorldSpace * testResultAtScreenSapce.w3 / z2;
+	glm::vec3 weightAtWorldSpace = testResultAtWorldSpace.weight();
+	const double z = glm::dot(glm::vec3(c0, c1, c2), weightAtWorldSpace);
+	return z;
+}
+
 static glm::vec4 divideByW(const glm::vec4 vec4)
 {
 	return glm::vec4(vec4.x / vec4.w, vec4.y / vec4.w, vec4.z / vec4.w, vec4.z);
@@ -155,4 +176,31 @@ static glm::vec4 divideByW(const glm::vec4 vec4)
 static glm::vec4 divideByNegativeW(const glm::vec4 vec4)
 {
 	return glm::vec4(vec4.x / -vec4.w, vec4.y / -vec4.w, vec4.z / -vec4.w, vec4.z);
+}
+
+/*
+Copy from stb_image.
+*/
+static void stbi__vertical_flip(void *image, int w, int h, int bytes_per_pixel)
+{
+	int row;
+	size_t bytes_per_row = (size_t)w * bytes_per_pixel;
+	stbi_uc temp[2048];
+	stbi_uc *bytes = (stbi_uc *)image;
+
+	for (row = 0; row < (h >> 1); row++) {
+		stbi_uc *row0 = bytes + row * bytes_per_row;
+		stbi_uc *row1 = bytes + (h - row - 1)*bytes_per_row;
+		// swap row0 with row1
+		size_t bytes_left = bytes_per_row;
+		while (bytes_left) {
+			size_t bytes_copy = (bytes_left < sizeof(temp)) ? bytes_left : sizeof(temp);
+			memcpy(temp, row0, bytes_copy);
+			memcpy(row0, row1, bytes_copy);
+			memcpy(row1, temp, bytes_copy);
+			row0 += bytes_copy;
+			row1 += bytes_copy;
+			bytes_left -= bytes_copy;
+		}
+	}
 }
