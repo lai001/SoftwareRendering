@@ -18,6 +18,7 @@
 #include "Renderer.hpp"
 #include "Camera.hpp"
 #include "ModelShader.hpp"
+#include "ModelShader2.hpp"
 #include "RenderPipeLine.hpp"
 #include "Texture2D.hpp"
 #include "ImageShader.hpp"
@@ -29,6 +30,7 @@ struct GlobalResource
 	const std::string modelPath = std::string(appFolderPath).append("\\Resource\\obj\\african_head\\african_head.obj");
 	const std::string boxModelPath = std::string(appFolderPath).append("\\Resource\\box.dae");
 	const std::string testImagePath = std::string(appFolderPath).append("\\Resource\\test0.jpg");
+	const std::string boxWithTextureModelPath = std::string(appFolderPath).append("./Resource/box_with_texutre.dae");
 	
 	const GLFWwindow* window = nullptr;
 	Renderer* renderer = nullptr;
@@ -41,6 +43,9 @@ struct GlobalResource
 
 	Texture2D* texture = nullptr;
 
+	Assimp::Importer* boxWithTextureModelImporter = nullptr;
+	const aiScene* boxWithTextureModelScene = nullptr;
+
 	GlobalResource(int argc, char ** argv)
 		:appPath(argv[0])
 	{
@@ -49,6 +54,8 @@ struct GlobalResource
 		modeImporter = new Assimp::Importer();
 		modelScene = modeImporter->ReadFile(modelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
 		texture = new Texture2D(testImagePath);
+		boxWithTextureModelImporter = new Assimp::Importer();
+		boxWithTextureModelScene = modeImporter->ReadFile(boxWithTextureModelPath, (aiProcess_Triangulate | aiProcess_JoinIdenticalVertices));
 	}
 };
 
@@ -297,11 +304,74 @@ void testPipeLine(const float time)
 	renderer->pipeline(pipeline);
 }
 
+void renderCube(const float time)
+{
+	Renderer* renderer = globalResource->renderer;
+
+	FCamera camera = FCamera(renderer->getWidth(), renderer->getHeight());
+
+	camera.MoveUp(0.0);
+	camera.MoveLeft(0.0);
+	camera.MoveBack(1.0);
+
+	glm::mat4x4 modelMat(1.0f);
+
+	glm::mat4x4 scaleMat = glm::scale(glm::mat4x4(1.0), glm::vec3(1.0f, 1.0f, 1.0f));
+	glm::mat4x4 translateMat = glm::translate(glm::mat4x4(1.0), glm::vec3(0.0f, 0.0, 5.0));
+	glm::mat4x4 rotateMat = glm::rotate(glm::mat4x4(1.0), glm::radians(time * 5.0f), glm::vec3(1.0f, 1.0f, 1.0f));
+
+	modelMat = translateMat * rotateMat * scaleMat;
+
+	glm::mat4x4 viewMat = camera.GetViewMat();
+	glm::mat4x4 projectionMat = camera.GetprojectionMat();
+	//glm::mat4x4 mvpMat = projectionMat * viewMat * modelMat;
+
+	std::function<BaseVertex2(aiMesh*, unsigned int)> getVertex = [renderer](aiMesh* mesh, unsigned int index) {
+		BaseVertex2 baseVertex;
+		const aiVector3D vertex = mesh->mVertices[index];
+		const aiVector3D coords = mesh->mTextureCoords[0][index];
+		baseVertex.position = glm::vec3(vertex.x, vertex.y, vertex.z);
+		baseVertex.textureCoords = glm::vec2(coords.x, coords.y);
+		return baseVertex;
+	};
+
+	const aiScene* scene = globalResource->boxWithTextureModelScene;
+	ModelShader2 shader;
+	shader.modelMat = modelMat;
+	shader.viewMat = viewMat;
+	shader.projectionMat = projectionMat;
+	shader.texture = globalResource->texture;
+	RenderPipeline pipeline;
+	pipeline.shader = &shader;
+	std::vector<BaseVertex2> vertexBuffer;
+
+	for (int meshIndex = 0; meshIndex < scene->mNumMeshes; meshIndex++)
+	{
+		aiMesh* mesh = scene->mMeshes[meshIndex];
+
+		for (int faceIndex = 0; faceIndex < mesh->mNumFaces; faceIndex++)
+		{
+			aiFace face = mesh->mFaces[faceIndex];
+			assert(face.mNumIndices == 3);
+			const BaseVertex2 vertex0 = getVertex(mesh, face.mIndices[0]);
+			const BaseVertex2 vertex1 = getVertex(mesh, face.mIndices[1]);
+			const BaseVertex2 vertex2 = getVertex(mesh, face.mIndices[2]);
+			vertexBuffer.insert(vertexBuffer.end(), { vertex0, vertex1, vertex2 });
+		}
+	}
+
+	pipeline.vertexBuffer = static_cast<void*>(vertexBuffer.data());
+	pipeline.triangleCount = vertexBuffer.size() / 3;
+
+	renderer->pipeline(pipeline);
+}
+
 void glRenderLoop()
 {
 	drawModel3(glfwGetTime());
 	testPipeLine(glfwGetTime());
 	drawImage();
+	renderCube(glfwGetTime());
 }
 
 void initGL()
