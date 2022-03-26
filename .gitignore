@@ -402,3 +402,5 @@ _deps
 build
 Vendor
 Resource
+vsxmake*
+.xmake

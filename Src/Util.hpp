@@ -36,9 +36,9 @@ static glm::vec3 randomColor()
 	};
 
 	glm::vec3 color;
-	color.r = randomDoubleValue();
-	color.g = randomDoubleValue();
-	color.b = randomDoubleValue();
+	color.r = (float)randomDoubleValue();
+	color.g = (float)randomDoubleValue();
+	color.b = (float)randomDoubleValue();
 	return color;
 }
 
@@ -73,27 +73,27 @@ static double interpolation(const glm::vec3 weight, const glm::vec3 value)
 static glm::vec4 interpolation(const glm::vec3 weight, const glm::vec4 v0, const glm::vec4 v1, const glm::vec4 v2)
 {
 	glm::vec4 value;
-	value.x = interpolation(weight, glm::vec3(v0.x, v1.x, v2.x));
-	value.y = interpolation(weight, glm::vec3(v0.y, v1.y, v2.y));
-	value.z = interpolation(weight, glm::vec3(v0.z, v1.z, v2.z));
-	value.w = interpolation(weight, glm::vec3(v0.w, v1.w, v2.w));
+	value.x = (float)interpolation(weight, glm::vec3(v0.x, v1.x, v2.x));
+	value.y = (float)interpolation(weight, glm::vec3(v0.y, v1.y, v2.y));
+	value.z = (float)interpolation(weight, glm::vec3(v0.z, v1.z, v2.z));
+	value.w = (float)interpolation(weight, glm::vec3(v0.w, v1.w, v2.w));
 	return value;
 }
 
 static glm::vec3 interpolation(const glm::vec3 weight, const glm::vec3 v0, const glm::vec3 v1, const glm::vec3 v2)
 {
 	glm::vec3 value;
-	value.x = interpolation(weight, glm::vec3(v0.x, v1.x, v2.x));
-	value.y = interpolation(weight, glm::vec3(v0.y, v1.y, v2.y));
-	value.z = interpolation(weight, glm::vec3(v0.z, v1.z, v2.z));
+	value.x = (float)interpolation(weight, glm::vec3(v0.x, v1.x, v2.x));
+	value.y = (float)interpolation(weight, glm::vec3(v0.y, v1.y, v2.y));
+	value.z = (float)interpolation(weight, glm::vec3(v0.z, v1.z, v2.z));
 	return value;
 }
 
 static glm::vec2 interpolation(const glm::vec3 weight, const glm::vec2 v0, const glm::vec2 v1, const glm::vec2 v2)
 {
 	glm::vec2 value;
-	value.x = interpolation(weight, glm::vec3(v0.x, v1.x, v2.x));
-	value.y = interpolation(weight, glm::vec3(v0.y, v1.y, v2.y));
+	value.x = (float)interpolation(weight, glm::vec3(v0.x, v1.x, v2.x));
+	value.y = (float)interpolation(weight, glm::vec3(v0.y, v1.y, v2.y));
 	//value.z = 0;
 	return value;
 }
@@ -156,7 +156,7 @@ static float zCorrection(const float c0, const float c1, const float c2,
 	{
 		glm::vec3 weightAtScreenSapce = testResultAtScreenSapce.weight();
 		const double z = c0;
-		return z;
+		return (float)z;
 	}
 	const double zAtWorldSpace = 1.0 / ((testResultAtScreenSapce.w1 / z0) + (testResultAtScreenSapce.w2 / z1) + (testResultAtScreenSapce.w3 / z2));
 	BarycentricTestResult testResultAtWorldSpace;
@@ -165,7 +165,7 @@ static float zCorrection(const float c0, const float c1, const float c2,
 	testResultAtWorldSpace.w3 = zAtWorldSpace * testResultAtScreenSapce.w3 / z2;
 	glm::vec3 weightAtWorldSpace = testResultAtWorldSpace.weight();
 	const double z = glm::dot(glm::vec3(c0, c1, c2), weightAtWorldSpace);
-	return z;
+	return (float)z;
 }
 
 static glm::vec4 divideByW(const glm::vec4 vec4)

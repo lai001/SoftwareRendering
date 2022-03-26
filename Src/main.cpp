@@ -3,6 +3,7 @@
 #include <regex>
 #include <numeric>
 #include <random>
+#include <assert.h>
 
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
@@ -381,19 +382,15 @@ void initGL()
 	glfwInit();
 
 	GLFWwindow* window = glfwCreateWindow(renderer->getWidth(), renderer->getHeight(), "SoftwareRendering", NULL, NULL);
+	assert(window);
 	globalResource->window = window;
-	if (window == NULL)
-	{
-		__debugbreak();
-		glfwTerminate();
-	}
 	glfwMakeContextCurrent(window);
 	//glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 	//glfwSetScrollCallback(window, scrollCallback);
 
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
 	{
-		__debugbreak();
+		assert(false);
 	}
 
 	while (!glfwWindowShouldClose(window))

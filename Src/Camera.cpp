@@ -128,10 +128,10 @@ void FCamera::MouseCallback(double Xpos, double Ypos)
 	//	bFirstMouse = false;
 	//}
 
-	float xoffset = Xpos - LastX;
-	float yoffset = LastY - Ypos;
-	LastX = Xpos;
-	LastY = Ypos;
+	float xoffset = (float)Xpos - LastX;
+	float yoffset = LastY - (float)Ypos;
+	LastX = (float)Xpos;
+	LastY = (float)Ypos;
 
 	if (!bIsMovable)
 	{
@@ -167,6 +167,6 @@ void FCamera::MouseCallback(double Xpos, double Ypos)
 void FCamera::ScrollCallback(double Xoffset, double Yoffset)
 {
 	float Fov = GetFov();
-	Fov -= Yoffset;
+	Fov -= (float)Yoffset;
 	SetFov(Fov);
 }

@@ -43,7 +43,7 @@ void PPM::writeZBufferToFile(const FrameBuffer & buffer, std::string filename)
 		for (int j = 0; j < width; j++)
 		{
 			int idx = i * width + j;
-			const unsigned char z = zBuffer[idx] * 255.0;
+			const unsigned char z = static_cast<const unsigned char>(zBuffer[idx] * 255.0);
 			f << std::to_string(z) << " ";
 			f << std::to_string(z) << " ";
 			f << std::to_string(z) << " ";
