@@ -1,6 +1,7 @@
 #pragma once
 #define GLM_FORCE_LEFT_HANDED
 #include "glm/glm.hpp"
+#include "glm/ext/matrix_transform.hpp"
 
 class FCamera
 {
@@ -21,9 +22,9 @@ private:
 	float Near = 0.1f;
 	float Far = 1000.0f;
 	bool bFirstMouse = true;
-
-	glm::mat4 View = glm::mat4(1.0f);
-	glm::mat4 Projection = glm::mat4(1.0f);
+	
+	glm::mat4 View = glm::identity<glm::mat4>();
+	glm::mat4 Projection = glm::identity<glm::mat4>();
 
 	float Yaw = 0.0f;
 	float Pitch = 0.0f;

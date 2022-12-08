@@ -1,6 +1,7 @@
 #pragma once
 
 #include "glm/glm.hpp"
+#include "glm/ext/matrix_transform.hpp"
 
 #include "Shader.hpp"
 #include "Texture2D.hpp"
@@ -14,9 +15,9 @@ struct BaseVertex2
 class ModelShader2 : public Shader
 {
 public:
-	glm::mat4x4 modelMat;
-	glm::mat4x4 viewMat;
-	glm::mat4x4 projectionMat;
+	glm::mat4x4 modelMat = glm::identity<glm::mat4x4>();
+	glm::mat4x4 viewMat = glm::identity<glm::mat4x4>();
+	glm::mat4x4 projectionMat = glm::identity<glm::mat4x4>();
 	Texture2D *texture = nullptr;
 
 	virtual RasterizationData vertexShader(const void * vertexBuffer, const int vertexIdx) override;

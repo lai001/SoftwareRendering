@@ -121,7 +121,7 @@ void drawModel2()
 
 	std::function<glm::vec3(aiMesh*, unsigned int)> getVertex = [renderer](aiMesh* mesh, unsigned int index) {
 		const aiVector3D vertex = mesh->mVertices[index];
-		double z = rangeMap(vertex.z, -1, 1, 0, 1);
+		double z = remapping(vertex.z, -1, 1, 0, 1);
 		z = 1 - z;
 		return glm::vec3(vertex.x, vertex.y, z);
 	};
@@ -369,9 +369,9 @@ void renderCube(const float time)
 
 void glRenderLoop()
 {
-	drawModel3(glfwGetTime());
-	testPipeLine(glfwGetTime());
-	drawImage();
+	//drawModel3(glfwGetTime());
+	//testPipeLine(glfwGetTime());
+	//drawImage();
 	renderCube(glfwGetTime());
 }
 
@@ -392,6 +392,7 @@ void initGL()
 	{
 		assert(false);
 	}
+	static auto lastTime = std::chrono::system_clock::now();
 
 	while (!glfwWindowShouldClose(window))
 	{
@@ -400,14 +401,21 @@ void initGL()
 		const void* data = renderer->getFrameBuffer()->getData();
 		int width = renderer->getWidth();
 		int height = renderer->getHeight();
-		int length = width * height;
+		size_t length = width * height;
 		void* copyImageData = new unsigned char[length * 3];
 		memcpy(copyImageData, renderer->getFrameBuffer()->getData(), length * 3);
 		stbi__vertical_flip(copyImageData, width, height, 3);
 		glDrawPixels(width, height, GL_RGB, GL_UNSIGNED_BYTE, copyImageData);
-		delete copyImageData;
+		delete[] copyImageData;
 		glfwSwapBuffers(window);
 		glfwPollEvents();
+
+		const auto now = std::chrono::system_clock::now();
+		const auto duration = now - lastTime;
+		const float seconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() / 1000.0f;
+		const std::string fpsStr = fmt::format("SoftwareRendering [fps {:.2f}]", 1.0f / seconds);
+		glfwSetWindowTitle(window, fpsStr.c_str());
+		lastTime = now;
 	}
 }
 
