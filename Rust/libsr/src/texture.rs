@@ -73,9 +73,12 @@ impl Texture {
         }
     }
 
-    pub fn from_file(file_path: &String) -> Result<Texture, Box<dyn std::error::Error>> {
+    pub fn from_file(file_path: &String, is_flipv: bool) -> Result<Texture, Box<dyn std::error::Error>> {
         match image::open(&file_path) {
-            Ok(dynamic_image) => {
+            Ok(mut dynamic_image) => {
+                if is_flipv {
+                    dynamic_image = dynamic_image.flipv();
+                }
                 let image_width = dynamic_image.width() as usize;
                 let image_height = dynamic_image.height() as usize;
                 let image_buffers = &dynamic_image.into_rgba8();

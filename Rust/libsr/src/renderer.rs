@@ -304,9 +304,9 @@ impl<'a> Renderer<'a> {
                                         &a_vec,
                                         &b_vec,
                                         &c_vec,
-                                        a_rasterization_data.position.z,
-                                        b_rasterization_data.position.z,
-                                        c_rasterization_data.position.z,
+                                        a.w,
+                                        b.w,
+                                        c.w,
                                         &test_result,
                                     );
                                 data.extra_datas
@@ -322,9 +322,9 @@ impl<'a> Renderer<'a> {
                                         &a_vec,
                                         &b_vec,
                                         &c_vec,
-                                        a_rasterization_data.position.z,
-                                        b_rasterization_data.position.z,
-                                        c_rasterization_data.position.z,
+                                        a.w,
+                                        b.w,
+                                        c.w,
                                         &test_result,
                                     );
                                 data.extra_datas
@@ -340,9 +340,9 @@ impl<'a> Renderer<'a> {
                                         &a_vec,
                                         &b_vec,
                                         &c_vec,
-                                        a_rasterization_data.position.z,
-                                        b_rasterization_data.position.z,
-                                        c_rasterization_data.position.z,
+                                        a.w,
+                                        b.w,
+                                        c.w,
                                         &test_result,
                                     );
                                 data.extra_datas
@@ -358,9 +358,9 @@ impl<'a> Renderer<'a> {
                                         &a_vec,
                                         &b_vec,
                                         &c_vec,
-                                        a_rasterization_data.position.z,
-                                        b_rasterization_data.position.z,
-                                        c_rasterization_data.position.z,
+                                        a.w,
+                                        b.w,
+                                        c.w,
                                         &test_result,
                                     );
                                 data.extra_datas
@@ -369,28 +369,10 @@ impl<'a> Renderer<'a> {
                                 panic!("");
                             }
                         }
-                        let position = Self::project_correction_interpolation_vec3(
-                            &a.xyz(),
-                            &b.xyz(),
-                            &c.xyz(),
-                            a_rasterization_data.position.z,
-                            b_rasterization_data.position.z,
-                            c_rasterization_data.position.z,
-                            &test_result,
-                        );
-                        data.position = Vector4::new(position.x, position.y, position.z, 1.0);
                         let color = shader.fragment(&data);
-                        let z_at_screen_sapce = Self::project_correction_interpolation_vec1(
-                            &Vector1::new(a.z),
-                            &Vector1::new(b.z),
-                            &Vector1::new(c.z),
-                            a_rasterization_data.position.z,
-                            b_rasterization_data.position.z,
-                            c_rasterization_data.position.z,
-                            &test_result,
-                        );
+                        let z_at_screen_sapce = Vector3::new(a.z, b.z, c.z).dot(&test_result.weight());
                         self.set_color_depth_func(
-                            &Vector3::new(position.x, position.y, z_at_screen_sapce.x),
+                            &Vector3::new(x, y, z_at_screen_sapce),
                             &color,
                             &graphics_pipeline.depth_cmp_func,
                         );
@@ -457,26 +439,38 @@ impl<'a> Renderer<'a> {
     //     )
     // }
 
-    fn get_weight_at_world_space(
+    // fn get_weight_at_world_space(
+    //     z0: f32,
+    //     z1: f32,
+    //     z2: f32,
+    //     test_result_at_screen_sapce: &BarycentricTestResult,
+    // ) -> BarycentricTestResult {
+    //     if z0 == z1 && z1 == z2 {
+    //         *test_result_at_screen_sapce
+    //     } else {
+    //         let z_at_world_space = 1.0
+    //             / ((test_result_at_screen_sapce.w1 / z0)
+    //                 + (test_result_at_screen_sapce.w2 / z1)
+    //                 + (test_result_at_screen_sapce.w3 / z2));
+    //         BarycentricTestResult {
+    //             is_inside_triangle: false,
+    //             w1: z_at_world_space * test_result_at_screen_sapce.w1 / z0,
+    //             w2: z_at_world_space * test_result_at_screen_sapce.w2 / z1,
+    //             w3: z_at_world_space * test_result_at_screen_sapce.w3 / z2,
+    //         }
+    //     }
+    // }
+
+    fn get_zp(
         z0: f32,
         z1: f32,
         z2: f32,
         test_result_at_screen_sapce: &BarycentricTestResult,
-    ) -> BarycentricTestResult {
-        if z0 == z1 && z1 == z2 {
-            *test_result_at_screen_sapce
-        } else {
-            let z_at_world_space = 1.0
-                / ((test_result_at_screen_sapce.w1 / z0)
-                    + (test_result_at_screen_sapce.w2 / z1)
-                    + (test_result_at_screen_sapce.w3 / z2));
-            BarycentricTestResult {
-                is_inside_triangle: false,
-                w1: z_at_world_space * test_result_at_screen_sapce.w1 / z0,
-                w2: z_at_world_space * test_result_at_screen_sapce.w2 / z1,
-                w3: z_at_world_space * test_result_at_screen_sapce.w3 / z2,
-            }
-        }
+    ) -> (f32, f32, f32, f32) {
+        let w1 = test_result_at_screen_sapce.w1 / z0;
+        let w2 = test_result_at_screen_sapce.w2 / z1;
+        let w3 = test_result_at_screen_sapce.w3 / z2;
+        (w1 + w2 + w3, w1, w2, w3)
     }
 
     fn project_correction_interpolation_vec4(
@@ -488,14 +482,8 @@ impl<'a> Renderer<'a> {
         z2: f32,
         test_result_at_screen_sapce: &BarycentricTestResult,
     ) -> Vector4<f32> {
-        let weight_at_world_space =
-            Self::get_weight_at_world_space(z0, z1, z2, test_result_at_screen_sapce);
-        let weight_at_world_space = &weight_at_world_space.weight();
-        let x = Vector3::new(c0.x, c1.x, c2.x).dot(weight_at_world_space);
-        let y = Vector3::new(c0.y, c1.y, c2.y).dot(weight_at_world_space);
-        let z = Vector3::new(c0.z, c1.z, c2.z).dot(weight_at_world_space);
-        let w = Vector3::new(c0.w, c1.w, c2.w).dot(weight_at_world_space);
-        Vector4::new(x, y, z, w)
+        let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
+        (c0 * w1 + c1 * w2 + c2 * w3) / zp
     }
 
     fn project_correction_interpolation_vec3(
@@ -507,13 +495,8 @@ impl<'a> Renderer<'a> {
         z2: f32,
         test_result_at_screen_sapce: &BarycentricTestResult,
     ) -> Vector3<f32> {
-        let weight_at_world_space =
-            Self::get_weight_at_world_space(z0, z1, z2, test_result_at_screen_sapce);
-        let weight_at_world_space = &weight_at_world_space.weight();
-        let x = Vector3::new(c0.x, c1.x, c2.x).dot(weight_at_world_space);
-        let y = Vector3::new(c0.y, c1.y, c2.y).dot(weight_at_world_space);
-        let z = Vector3::new(c0.z, c1.z, c2.z).dot(weight_at_world_space);
-        Vector3::new(x, y, z)
+        let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
+        (c0 * w1 + c1 * w2 + c2 * w3) / zp
     }
 
     fn project_correction_interpolation_vec2(
@@ -525,12 +508,8 @@ impl<'a> Renderer<'a> {
         z2: f32,
         test_result_at_screen_sapce: &BarycentricTestResult,
     ) -> Vector2<f32> {
-        let weight_at_world_space =
-            Self::get_weight_at_world_space(z0, z1, z2, test_result_at_screen_sapce);
-        let weight_at_world_space = &weight_at_world_space.weight();
-        let x = Vector3::new(c0.x, c1.x, c2.x).dot(weight_at_world_space);
-        let y = Vector3::new(c0.y, c1.y, c2.y).dot(weight_at_world_space);
-        Vector2::new(x, y)
+        let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
+        (c0 * w1 + c1 * w2 + c2 * w3) / zp
     }
 
     fn project_correction_interpolation_vec1(
@@ -542,11 +521,8 @@ impl<'a> Renderer<'a> {
         z2: f32,
         test_result_at_screen_sapce: &BarycentricTestResult,
     ) -> Vector1<f32> {
-        let weight_at_world_space =
-            Self::get_weight_at_world_space(z0, z1, z2, test_result_at_screen_sapce);
-        let weight_at_world_space = &weight_at_world_space.weight();
-        let x = Vector3::new(c0.x, c1.x, c2.x).dot(weight_at_world_space);
-        Vector1::new(x)
+        let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
+        (c0 * w1 + c1 * w2 + c2 * w3) / zp
     }
 }
 

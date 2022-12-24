@@ -284,7 +284,7 @@ fn main() {
             // russimp::scene::PostProcess::JoinIdenticalVertices,
         ],
     );
-    let input_texture = Texture::from_file(&"../../Resource/test0.jpg".to_string());
+    let input_texture = Texture::from_file(&"../../Resource/test0.jpg".to_string(), true);
 
     if let (Ok(input_texture), Ok(scene)) = (input_texture, scene) {
         loop {
