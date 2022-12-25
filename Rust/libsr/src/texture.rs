@@ -1,18 +1,18 @@
 use nalgebra::{Vector3, Vector4};
 use std::convert::TryInto;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ETextureType {
     Dim2D,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ETextureFormat {
     R8g8b8a8Unorm,
     // R32g32b32a32Float,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TextureDescriptor {
     pub width: usize,
     pub height: usize,
@@ -21,6 +21,7 @@ pub struct TextureDescriptor {
     pub r#type: ETextureType,
 }
 
+#[derive(Clone)]
 pub struct Texture {
     pub(crate) buffers: Vec<Box<Vec<u8>>>,
     pub descriptor: TextureDescriptor,
@@ -73,7 +74,10 @@ impl Texture {
         }
     }
 
-    pub fn from_file(file_path: &String, is_flipv: bool) -> Result<Texture, Box<dyn std::error::Error>> {
+    pub fn from_file(
+        file_path: &String,
+        is_flipv: bool,
+    ) -> Result<Texture, Box<dyn std::error::Error>> {
         match image::open(&file_path) {
             Ok(mut dynamic_image) => {
                 if is_flipv {

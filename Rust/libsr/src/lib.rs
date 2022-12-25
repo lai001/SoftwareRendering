@@ -1,4 +1,5 @@
 pub mod barycentric_test_result;
+pub mod benchmark;
 pub mod color;
 pub mod depth_cmp;
 pub mod error;

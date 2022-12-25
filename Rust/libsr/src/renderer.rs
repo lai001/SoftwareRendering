@@ -92,12 +92,23 @@ impl<'a> Renderer<'a> {
         (descriptor.width, descriptor.height)
     }
 
-    pub fn clean_color(&mut self) {
+    pub fn clean_color(&mut self, color: Option<&Vector4<f32>>) {
+        let (width, height) = self.get_back_buffer_width_height();
         let texture = Rc::clone(&self.frame_buffer.texture);
         let mut texture = (&*texture).borrow_mut();
         let buffers = &mut texture.buffers;
         let buffer = buffers.get_mut(0).unwrap();
-        buffer.fill(0);
+        match color {
+            Some(color) => {
+                for index in 0..height * width {
+                    buffer[index * 4 + 0] = (color.x * 255.0) as u8;
+                    buffer[index * 4 + 1] = (color.y * 255.0) as u8;
+                    buffer[index * 4 + 2] = (color.z * 255.0) as u8;
+                    buffer[index * 4 + 3] = (color.w * 255.0) as u8;
+                }
+            }
+            None => buffer.fill(0),
+        }
     }
 
     pub fn clean_depth(&mut self) {
@@ -265,6 +276,22 @@ impl<'a> Renderer<'a> {
             let b = Self::divide_by_w(&b_rasterization_data.position);
             let c = Self::divide_by_w(&c_rasterization_data.position);
 
+            match graphics_pipeline.face_culling_mode {
+                EFaceCullingMode::None => {}
+                EFaceCullingMode::Front => {
+                    let is_face_culling = Self::face_culling(&a.xyz(), &b.xyz(), &c.xyz());
+                    if is_face_culling {
+                        continue;
+                    }
+                }
+                EFaceCullingMode::Back => {
+                    let is_face_culling = Self::face_culling(&a.xyz(), &b.xyz(), &c.xyz());
+                    if is_face_culling == false {
+                        continue;
+                    }
+                }
+            }
+
             if !Self::is_valid_triangle(&a.xy(), &b.xy(), &c.xy()) {
                 continue;
             }
@@ -370,7 +397,8 @@ impl<'a> Renderer<'a> {
                             }
                         }
                         let color = shader.fragment(&data);
-                        let z_at_screen_sapce = Vector3::new(a.z, b.z, c.z).dot(&test_result.weight());
+                        let z_at_screen_sapce =
+                            Vector3::new(a.z, b.z, c.z).dot(&test_result.weight());
                         self.set_color_depth_func(
                             &Vector3::new(x, y, z_at_screen_sapce),
                             &color,
@@ -523,6 +551,14 @@ impl<'a> Renderer<'a> {
     ) -> Vector1<f32> {
         let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
         (c0 * w1 + c1 * w2 + c2 * w3) / zp
+    }
+
+    fn face_culling(v1: &Vector3<f32>, v2: &Vector3<f32>, v3: &Vector3<f32>) -> bool {
+        let tmp1 = v2 - v1;
+        let tmp2 = v3 - v1;
+        let normal = tmp1.cross(&tmp2).normalize();
+        let view = Vector3::new(0.0, 0.0, -1.0);
+        normal.dot(&view) < 0.0
     }
 }
 

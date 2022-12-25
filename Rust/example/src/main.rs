@@ -5,6 +5,7 @@ use nalgebra::Point3;
 use nalgebra::Vector2;
 use nalgebra::Vector3;
 use nalgebra::Vector4;
+use sr::benchmark::Benchmark;
 use sr::color::preset_color;
 use sr::depth_cmp::EDepthCmpFunc;
 use sr::frame_buffer::*;
@@ -14,16 +15,10 @@ use sr::texture::*;
 use sr_example::image_shader::*;
 use sr_example::model_shader::*;
 use sr_example::triangle_shader::*;
-use std::env;
-use std::rc::Rc;
 
-fn save_file_to_disk(frame_buffer: &FrameBuffer, frame_index: u32) {
-    let texture = Rc::clone(frame_buffer.get_color_attachment());
-    let texture = &*texture;
-    let descriptor = &texture.borrow().descriptor;
-
-    let binding = texture.borrow();
-    let write_buffer = binding.get_buffers().get(0).unwrap().as_slice();
+fn save_file_to_disk(texture: &Texture, frame_index: u32) {
+    let descriptor = &texture.descriptor;
+    let write_buffer = texture.get_buffers().get(0).unwrap().as_slice();
 
     let path = std::path::Path::new(std::env::current_dir().unwrap().to_str().unwrap())
         .join("target")
@@ -268,8 +263,8 @@ fn main() {
     let mut frame_index: u32 = 0;
     let mut time: f32 = frame_index as f32 * delta;
     let descriptor = TextureDescriptor {
-        width: 400,
-        height: 400,
+        width: 2048,
+        height: 2048,
         array_size: 1,
         format: ETextureFormat::R8g8b8a8Unorm,
         r#type: ETextureType::Dim2D,
@@ -278,29 +273,37 @@ fn main() {
     let mut renderer = Renderer::new(&mut frame_buffer);
 
     let scene = russimp::scene::Scene::from_file(
-        "../../Resource/box_with_texutre.dae",
+        "../../Resource/box_with_texutre.fbx",
         vec![
             russimp::scene::PostProcess::Triangulate,
             // russimp::scene::PostProcess::JoinIdenticalVertices,
         ],
     );
-    let input_texture = Texture::from_file(&"../../Resource/test0.jpg".to_string(), true);
-
+    let input_texture = Texture::from_file(&"../../Resource/ColorGrid.png".to_string(), true);
     if let (Ok(input_texture), Ok(scene)) = (input_texture, scene) {
         loop {
             if frame_index >= 60 {
                 break;
             }
-            renderer.clean_color();
+            let mut benchmark = Benchmark::run();
+            renderer.clean_color(None);
             renderer.clean_depth();
             // test_draw_image(&mut renderer, &input_texture);
             // test_draw_triangle(&mut renderer);
             // test_draw_line(&mut renderer);
             // test_draw_cube(&mut renderer, &input_texture, time, frame_index);
             test_draw_scene(&mut renderer, &scene, &input_texture, time, frame_index);
-            save_file_to_disk(renderer.get_frame_buffer(), frame_index);
+            let clone_texture = renderer
+                .get_frame_buffer()
+                .get_color_attachment()
+                .borrow()
+                .to_owned();
+            std::thread::spawn(move || {
+                save_file_to_disk(&clone_texture, frame_index);
+            });
             time += delta;
             frame_index += 1;
+            benchmark.end().print(None);
         }
     } else {
         panic!("");
