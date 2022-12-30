@@ -15,9 +15,13 @@ pub struct Renderer<'a> {
 }
 
 impl Renderer<'_> {
-    fn clamp_i32(val: &Vector2<i32>, min: &Vector2<i32>, max: &Vector2<i32>) -> Vector2<i32> {
-        let x: i32 = nalgebra::clamp(val.x, min.x, max.x);
-        let y: i32 = nalgebra::clamp(val.y, min.y, max.y);
+    fn component_clamp<T: nalgebra::Scalar + std::cmp::PartialOrd + Copy>(
+        val: &Vector2<T>,
+        min: &Vector2<T>,
+        max: &Vector2<T>,
+    ) -> Vector2<T> {
+        let x: T = nalgebra::clamp(val.x, min.x, max.x);
+        let y: T = nalgebra::clamp(val.y, min.y, max.y);
         Vector2::new(x, y)
     }
 
@@ -137,11 +141,13 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn set_color_by_point_ndc(&mut self, point: &Vector2<f32>, color: &Vector4<f32>) {
-        let (_, height) = self.get_back_buffer_width_height();
         match self.ndc_to_viewport(point) {
             Some(viewport_pixel_index) => {
-                let index = viewport_pixel_index.y * height + viewport_pixel_index.x;
-                self.set_color_by_index(index, color);
+                self.set_color_by_whi_viewport(
+                    viewport_pixel_index.x,
+                    viewport_pixel_index.y,
+                    color,
+                );
             }
             None => {}
         }
@@ -153,19 +159,23 @@ impl<'a> Renderer<'a> {
         color: &Vector4<f32>,
         depth_cmp_func: &EDepthCmpFunc,
     ) {
-        let (_, height) = self.get_back_buffer_width_height();
+        let (width, _) = self.get_back_buffer_width_height();
 
         match self.ndc_to_viewport(&point.xy()) {
             Some(viewport_pixel_index) => {
                 let z_value = self
                     .frame_buffer
                     .z_buffer
-                    .get_mut(viewport_pixel_index.y * height + viewport_pixel_index.x)
+                    .get_mut(viewport_pixel_index.y * width + viewport_pixel_index.x)
                     .unwrap();
                 let is_pass = depth_cmp_func.get_func()(point.z, *z_value);
                 if is_pass {
                     *z_value = point.z;
-                    self.set_color_by_point_ndc(&point.xy(), color);
+                    self.set_color_by_whi_viewport(
+                        viewport_pixel_index.x,
+                        viewport_pixel_index.y,
+                        color,
+                    );
                 }
             }
             None => {}
@@ -181,12 +191,12 @@ impl<'a> Renderer<'a> {
         let start: Vector2<f32> = Renderer::ndc_to_tex_coord(&Renderer::clamp_ndc(&start));
         let end: Vector2<f32> = Renderer::ndc_to_tex_coord(&Renderer::clamp_ndc(&end));
 
-        let start: Vector2<i32> = Renderer::clamp_i32(
+        let start: Vector2<i32> = Renderer::component_clamp(
             &Vector2::new((start.x * width) as i32, (start.y * height) as i32),
             &Vector2::new(0, 0),
             &Vector2::new((width - 1.0) as i32, (height - 1.0) as i32),
         );
-        let end: Vector2<i32> = Renderer::clamp_i32(
+        let end: Vector2<i32> = Renderer::component_clamp(
             &Vector2::new((end.x * width) as i32, (end.y * height) as i32),
             &Vector2::new(0, 0),
             &Vector2::new((width - 1.0) as i32, (height - 1.0) as i32),
@@ -280,13 +290,13 @@ impl<'a> Renderer<'a> {
                 EFaceCullingMode::None => {}
                 EFaceCullingMode::Front => {
                     let is_face_culling = Self::face_culling(&a.xyz(), &b.xyz(), &c.xyz());
-                    if is_face_culling {
+                    if is_face_culling == false {
                         continue;
                     }
                 }
                 EFaceCullingMode::Back => {
                     let is_face_culling = Self::face_culling(&a.xyz(), &b.xyz(), &c.xyz());
-                    if is_face_culling == false {
+                    if is_face_culling {
                         continue;
                     }
                 }
@@ -495,10 +505,17 @@ impl<'a> Renderer<'a> {
         z2: f32,
         test_result_at_screen_sapce: &BarycentricTestResult,
     ) -> (f32, f32, f32, f32) {
-        let w1 = test_result_at_screen_sapce.w1 / z0;
-        let w2 = test_result_at_screen_sapce.w2 / z1;
-        let w3 = test_result_at_screen_sapce.w3 / z2;
-        (w1 + w2 + w3, w1, w2, w3)
+        if (z0 == z1) && (z1 == z2) {
+            let w1 = test_result_at_screen_sapce.w1;
+            let w2 = test_result_at_screen_sapce.w2;
+            let w3 = test_result_at_screen_sapce.w3;
+            (w1 + w2 + w3, w1, w2, w3)
+        } else {
+            let w1 = test_result_at_screen_sapce.w1 / z0;
+            let w2 = test_result_at_screen_sapce.w2 / z1;
+            let w3 = test_result_at_screen_sapce.w3 / z2;
+            (w1 + w2 + w3, w1, w2, w3)
+        }
     }
 
     fn project_correction_interpolation_vec4(
@@ -557,7 +574,7 @@ impl<'a> Renderer<'a> {
         let tmp1 = v2 - v1;
         let tmp2 = v3 - v1;
         let normal = tmp1.cross(&tmp2).normalize();
-        let view = Vector3::new(0.0, 0.0, -1.0);
+        let view = Vector3::new(0.0, 0.0, 1.0);
         normal.dot(&view) < 0.0
     }
 }

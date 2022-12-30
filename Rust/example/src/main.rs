@@ -12,6 +12,7 @@ use sr::frame_buffer::*;
 use sr::graphics_pipeline::*;
 use sr::renderer::*;
 use sr::texture::*;
+use sr_example::camera::Camera;
 use sr_example::image_shader::*;
 use sr_example::model_shader::*;
 use sr_example::triangle_shader::*;
@@ -67,8 +68,8 @@ fn test_draw_image(renderer: &mut Renderer, input_texture: &Texture) {
     let shader = ImageShader {
         texture: &input_texture,
     };
-    let graphics_pipeline = GraphicsPipeline::from_shader(&shader);
-
+    let mut graphics_pipeline = GraphicsPipeline::from_shader(&shader);
+    graphics_pipeline.face_culling_mode = EFaceCullingMode::None;
     renderer.render_graphics_pipeline(&graphics_pipeline, &vertex_buffer, None);
 }
 
@@ -90,6 +91,7 @@ fn test_draw_triangle(renderer: &mut Renderer) {
 
     let shader = TriangleShader {};
     let mut graphics_pipeline = GraphicsPipeline::from_shader(&shader);
+    graphics_pipeline.face_culling_mode = EFaceCullingMode::None;
     graphics_pipeline.depth_cmp_func = EDepthCmpFunc::Always;
     renderer.render_graphics_pipeline(
         &graphics_pipeline,
@@ -235,14 +237,16 @@ fn test_draw_scene(
     let rotation = time * 30.0 * 3.0;
     let scale = 0.5_f32;
 
-    let projection = Perspective3::new(1.0 / 1.0, 39.5978_f32.to_radians(), 0.01, 1000.0);
-    let eye = Point3::new(0.0, 0.0, -3.2);
-    let target = Point3::new(0.0, 0.0, 0.0);
-    let view = Isometry3::look_at_rh(&eye, &target, &Vector3::y());
+    let aspect = {
+        let (width, height) = renderer.get_back_buffer_width_height();
+        width as f32 / height as f32
+    };
+    let mut camera = Camera::new(aspect, 39.5978_f32.to_radians(), 0.01, 1000.0);
+    camera.set_eye(&Vector3::new(0.0, 0.0, -3.0));
 
     let model_matrix: Matrix4<f32> = Matrix4::new_translation(&Vector3::new(0.0, 0.0, 0.0))
         * Matrix4::new_rotation(Vector3::new(
-            0.0,
+            rotation.to_radians(),
             rotation.to_radians(),
             rotation.to_radians(),
         ))
@@ -251,8 +255,8 @@ fn test_draw_scene(
     let shader = ModelShader {
         texture: &input_texture,
         model_matrix: model_matrix,
-        view_matrix: view.to_matrix(),
-        projection_matrix: *projection.as_matrix(),
+        view_matrix: *camera.get_view(),
+        projection_matrix: *camera.get_projection(),
     };
     let graphics_pipeline = GraphicsPipeline::from_shader(&shader);
     renderer.render_graphics_pipeline(&graphics_pipeline, &vertex_buffer, Some(&index_buffer));
@@ -263,8 +267,8 @@ fn main() {
     let mut frame_index: u32 = 0;
     let mut time: f32 = frame_index as f32 * delta;
     let descriptor = TextureDescriptor {
-        width: 2048,
-        height: 2048,
+        width: 800,
+        height: 600,
         array_size: 1,
         format: ETextureFormat::R8g8b8a8Unorm,
         r#type: ETextureType::Dim2D,
@@ -276,7 +280,7 @@ fn main() {
         "../../Resource/box_with_texutre.fbx",
         vec![
             russimp::scene::PostProcess::Triangulate,
-            // russimp::scene::PostProcess::JoinIdenticalVertices,
+            russimp::scene::PostProcess::MakeLeftHanded,
         ],
     );
     let input_texture = Texture::from_file(&"../../Resource/ColorGrid.png".to_string(), true);
