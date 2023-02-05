@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rand = "0.3.14"
 image = "0.24.5"
 nalgebra = "0.31.4"
-russimp = {version  = "1.0.4", features = ["prebuilt"]}
-sr = { path = "../libsr" }
+russimp = { version = "1.0.4", features = ["prebuilt"] }
+sr = { version = "0.1.0", path = "../libsr" }

@@ -1,14 +1,18 @@
 use nalgebra::{Vector2, Vector3, Vector4};
-use sr::{shader::*, texture::*};
+use sr::{
+    shader::{EShaderAttribute, RasterizationData, Shader, ShaderVertexData},
+    texture::Texture,
+};
+use std::sync::Arc;
 
-pub struct ModelShader<'a> {
-    pub texture: &'a Texture,
+pub struct ModelShader {
+    pub texture: Arc<Texture>,
     pub model_matrix: nalgebra::Matrix4<f32>,
     pub view_matrix: nalgebra::Matrix4<f32>,
     pub projection_matrix: nalgebra::Matrix4<f32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ModelShaderVertex {
     pub position: Vector3<f32>,
     pub vertext_color: Vector4<f32>,
@@ -17,7 +21,7 @@ pub struct ModelShaderVertex {
 
 impl ShaderVertexData for ModelShaderVertex {}
 
-impl TShader<ModelShaderVertex> for ModelShader<'_> {
+impl Shader<ModelShaderVertex> for ModelShader {
     fn vertex(&self, vertex_data: &ModelShaderVertex) -> RasterizationData {
         let position = self.projection_matrix
             * self.view_matrix
@@ -31,18 +35,18 @@ impl TShader<ModelShaderVertex> for ModelShader<'_> {
         let uv = Vector3::new(vertex_data.uv.x, vertex_data.uv.y, 0.0);
         let out = RasterizationData {
             position: position,
-            extra_datas: vec![
-                EShaderExtraData::Vec4(vertex_data.vertext_color),
-                EShaderExtraData::Vec3(uv),
+            attributes: vec![
+                EShaderAttribute::Vec4(vertex_data.vertext_color),
+                EShaderAttribute::Vec3(uv),
             ],
         };
         out
     }
 
     fn fragment(&self, rasterization_data: &RasterizationData) -> Vector4<f32> {
-        if let (EShaderExtraData::Vec4(color), EShaderExtraData::Vec3(uv)) = (
-            &rasterization_data.extra_datas[0],
-            &rasterization_data.extra_datas[1],
+        if let (EShaderAttribute::Vec4(color), EShaderAttribute::Vec3(uv)) = (
+            &rasterization_data.attributes[0],
+            &rasterization_data.attributes[1],
         ) {
             // self.texture.sample(uv).component_mul(color)
             self.texture.sample(uv)

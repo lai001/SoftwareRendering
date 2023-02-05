@@ -17,19 +17,20 @@ impl BarycentricTestResult {
         y: f32,
     ) -> BarycentricTestResult {
         let check = |value: f32| (value >= 0.0) && (value <= 1.0);
-        let u = Vector3::new(c.x - a.x, b.x - a.x, a.x - x).cross(&Vector3::new(
-            c.y - a.y,
+        let u = Vector3::new(b.x - a.x, c.x - a.x, a.x - x).cross(&Vector3::new(
             b.y - a.y,
+            c.y - a.y,
             a.y - y,
         ));
-        let w1 = 1.0 - (u.x + u.y) / u.z;
-        let w2 = u.y / u.z;
-        let w3 = u.x / u.z;
+        let u = u / u.z;
+        let w1 = 1.0 - (u.x + u.y);
+        let w2 = u.x;
+        let w3 = u.y;
         BarycentricTestResult {
             is_inside_triangle: check(w1) && check(w2) && check(w3),
-            w1: w1,
-            w2: w2,
-            w3: w3,
+            w1,
+            w2,
+            w3,
         }
     }
 

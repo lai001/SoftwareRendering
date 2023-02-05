@@ -9,3 +9,5 @@ pub mod rect;
 pub mod renderer;
 pub mod shader;
 pub mod texture;
+#[macro_use]
+extern crate lazy_static;

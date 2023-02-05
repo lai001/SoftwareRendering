@@ -1,28 +1,60 @@
-use itertools::izip;
-use std::rc::Rc;
-
 use crate::{
     barycentric_test_result::BarycentricTestResult,
     depth_cmp::EDepthCmpFunc,
-    frame_buffer::*,
-    graphics_pipeline::*,
-    shader::{EShaderExtraData, RasterizationData, ShaderVertexData},
+    frame_buffer::FrameBuffer,
+    graphics_pipeline::{EFaceCullingMode, GraphicsPipeline},
+    shader::{EShaderAttribute, RasterizationData, Shader, ShaderVertexData},
+    texture::{Texture, TextureDescriptor},
 };
-use nalgebra::{Matrix3, Point2, Vector1, Vector2, Vector3, Vector4};
+use nalgebra::{Matrix3, Point2, SVector, Vector2, Vector3, Vector4};
+use std::sync::{mpsc::channel, Arc, Mutex};
 
-pub struct Renderer<'a> {
-    pub(crate) frame_buffer: &'a mut FrameBuffer,
+lazy_static! {
+    static ref GLOBAL_RENDERER_THREAD_POOL: Mutex<rayon::ThreadPool> = Mutex::new(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(std::thread::available_parallelism().unwrap().get())
+            .build()
+            .unwrap(),
+    );
 }
 
-impl Renderer<'_> {
-    fn component_clamp<T: nalgebra::Scalar + std::cmp::PartialOrd + Copy>(
-        val: &Vector2<T>,
-        min: &Vector2<T>,
-        max: &Vector2<T>,
-    ) -> Vector2<T> {
-        let x: T = nalgebra::clamp(val.x, min.x, max.x);
-        let y: T = nalgebra::clamp(val.y, min.y, max.y);
-        Vector2::new(x, y)
+struct RenderResult {
+    position: Vector3<f32>,
+    color: Vector4<f32>,
+}
+
+/**
+ * TODO:
+ * Viewport clipping
+ * Early Depth Test
+ * Frustum culling
+ * Visibility and Occlusion Culling
+ * Blending
+ * Stencil Test
+ * SIMD
+ */
+pub struct Renderer {
+    pub(crate) frame_buffer: FrameBuffer,
+}
+
+impl Renderer {
+    fn component_clamp<
+        T: nalgebra::Scalar + std::cmp::PartialOrd + Copy + num_traits::Zero,
+        const D: usize,
+    >(
+        val: &SVector<T, D>,
+        min: &SVector<T, D>,
+        max: &SVector<T, D>,
+    ) -> SVector<T, D> {
+        let mut output = SVector::<T, D>::zeros();
+        for i in 0..D {
+            *(&mut output.data.as_mut_slice()).get_mut(i).unwrap() = nalgebra::clamp(
+                *val.get(i).unwrap(),
+                *min.get(i).unwrap(),
+                *max.get(i).unwrap(),
+            );
+        }
+        output
     }
 
     fn clamp_ndc(val: &Vector2<f32>) -> Vector2<f32> {
@@ -32,21 +64,11 @@ impl Renderer<'_> {
     }
 
     fn ndc_to_tex_coord(val: &Vector2<f32>) -> Vector2<f32> {
-        let mat: Matrix3<f32> = Matrix3::new(
-            1.0 / 2.0,
-            0.0,
-            1.0 / 2.0,
-            0.0,
-            1.0 / 2.0,
-            1.0 / 2.0,
-            0.0,
-            0.0,
-            1.0,
-        );
-        let mat1: Matrix3<f32> = Matrix3::new(1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 1.0);
-        let val: Vector3<f32> = Vector3::new(val.x, val.y, 1.0);
-        let val: Vector3<f32> = mat1 * mat * val;
-        Vector2::new(val.x, val.y)
+        let m1 = Matrix3::new_scaling(1.0 / 2.0);
+        let m2 = Matrix3::new_translation(&Vector2::new(1.0 / 2.0, 1.0 / 2.0));
+        let m3 = Matrix3::new_nonuniform_scaling(&Vector2::new(1.0, -1.0));
+        let m4 = Matrix3::new_translation(&Vector2::new(0.0, 1.0));
+        (m4 * m3 * m2 * m1 * Vector3::new(val.x, val.y, 1.0)).xy()
     }
 
     fn ndc_to_viewport(&self, point: &Vector2<f32>) -> Option<Vector2<usize>> {
@@ -65,8 +87,6 @@ impl Renderer<'_> {
         } else {
             None
         }
-        // assert!(point.x >= min_value && point.x <= max_value);
-        // assert!(point.y >= min_value && point.y <= max_value);
     }
 
     fn vector2_order<'a>(
@@ -81,9 +101,11 @@ impl Renderer<'_> {
     }
 }
 
-impl<'a> Renderer<'a> {
-    pub fn new(frame_buffer: &'a mut FrameBuffer) -> Renderer<'a> {
-        Renderer { frame_buffer }
+impl Renderer {
+    pub fn from_texture_descriptor(descriptor: TextureDescriptor) -> Renderer {
+        Renderer {
+            frame_buffer: FrameBuffer::from_texture(Texture::from_descriptor(descriptor)),
+        }
     }
 
     pub fn get_frame_buffer(&self) -> &FrameBuffer {
@@ -91,15 +113,14 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn get_back_buffer_width_height(&self) -> (usize, usize) {
-        let texture = Rc::clone(&self.frame_buffer.texture);
-        let descriptor = &texture.borrow().descriptor;
+        let texture = &self.frame_buffer.texture;
+        let descriptor = &texture.descriptor;
         (descriptor.width, descriptor.height)
     }
 
-    pub fn clean_color(&mut self, color: Option<&Vector4<f32>>) {
+    pub fn clear_color(&mut self, color: Option<&Vector4<f32>>) {
         let (width, height) = self.get_back_buffer_width_height();
-        let texture = Rc::clone(&self.frame_buffer.texture);
-        let mut texture = (&*texture).borrow_mut();
+        let texture = &mut self.frame_buffer.texture;
         let buffers = &mut texture.buffers;
         let buffer = buffers.get_mut(0).unwrap();
         match color {
@@ -115,17 +136,23 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    pub fn clean_depth(&mut self) {
-        self.frame_buffer.z_buffer.fill(1.0);
+    pub fn clear_depth(&mut self, value: Option<f32>) {
+        match value {
+            Some(value) => {
+                self.frame_buffer.z_buffer.fill(value);
+            }
+            None => {
+                self.frame_buffer.z_buffer.fill(FrameBuffer::DEFAULT_ZVALUE);
+            }
+        }
     }
 
     pub fn set_color_by_index(&mut self, index: usize, color: &Vector4<f32>) {
         let (width, height) = self.get_back_buffer_width_height();
-        let texture = Rc::clone(&self.frame_buffer.texture);
-        let mut texture = (&*texture).borrow_mut();
+        let texture = &mut self.frame_buffer.texture;
         let max_index = height * width;
         let buffers = &mut texture.buffers;
-        let buffer = buffers.get_mut(0).expect("Buffer is empty");
+        let buffer = buffers.get_mut(0).unwrap();
         if index < max_index {
             buffer[index * 4 + 0] = (color.x * 255.0) as u8;
             buffer[index * 4 + 1] = (color.y * 255.0) as u8;
@@ -227,197 +254,239 @@ impl<'a> Renderer<'a> {
         }
     }
 
+    fn float_range_from(start: f32, end: f32, length: usize) -> Vec<f32> {
+        let start = (start * length as f32) as i32;
+        let end = (end * length as f32) as i32;
+        (start..end).map(|x| x as f32 / length as f32).collect()
+    }
+
+    fn is_pass_face_culling(
+        a: &Vector3<f32>,
+        b: &Vector3<f32>,
+        c: &Vector3<f32>,
+        face_culling_mode: &EFaceCullingMode,
+    ) -> bool {
+        match face_culling_mode {
+            EFaceCullingMode::None => true,
+            EFaceCullingMode::Front => Self::face_culling(a, b, c),
+            EFaceCullingMode::Back => Self::face_culling(a, b, c) == false,
+        }
+    }
+
+    fn render_triangle<T: ShaderVertexData>(
+        a: T,
+        b: T,
+        c: T,
+        viewport: Vector2<usize>,
+        shader: Arc<Mutex<dyn Shader<T>>>,
+        face_culling_mode: EFaceCullingMode,
+    ) -> Box<Vec<RenderResult>> {
+        let mut render_result = Box::<Vec<RenderResult>>::new(Vec::new());
+        let a_rasterization_data: RasterizationData;
+        let b_rasterization_data: RasterizationData;
+        let c_rasterization_data: RasterizationData;
+        {
+            let shader = shader.lock().unwrap();
+            a_rasterization_data = shader.vertex(&a);
+            b_rasterization_data = shader.vertex(&b);
+            c_rasterization_data = shader.vertex(&c);
+        }
+
+        assert_eq!(
+            a_rasterization_data.attributes.len(),
+            b_rasterization_data.attributes.len()
+        );
+        assert_eq!(
+            b_rasterization_data.attributes.len(),
+            c_rasterization_data.attributes.len()
+        );
+
+        let a = Self::divide_by_w(&a_rasterization_data.position);
+        let b = Self::divide_by_w(&b_rasterization_data.position);
+        let c = Self::divide_by_w(&c_rasterization_data.position);
+
+        if Self::is_pass_face_culling(&a.xyz(), &b.xyz(), &c.xyz(), &face_culling_mode)
+            && Self::is_valid_triangle(&a.xy(), &b.xy(), &c.xy())
+        {
+            let bounding_box = crate::rect::Rect::bounding_box(&a.xy(), &b.xy(), &c.xy());
+            let (width, height) = (viewport.x, viewport.y);
+            for y in
+                Self::float_range_from(bounding_box.y, bounding_box.y + bounding_box.height, height)
+            {
+                for x in Self::float_range_from(
+                    bounding_box.x,
+                    bounding_box.x + bounding_box.width,
+                    width,
+                ) {
+                    let test_result = BarycentricTestResult::test(&a.xy(), &b.xy(), &c.xy(), x, y);
+                    if test_result.is_inside_triangle {
+                        let mut data = RasterizationData {
+                            position: Vector4::identity(),
+                            attributes: vec![],
+                        };
+
+                        for i in 0..a_rasterization_data.attributes.len() {
+                            let a_extra_data = &a_rasterization_data.attributes[i];
+                            let b_extra_data = &b_rasterization_data.attributes[i];
+                            let c_extra_data = &c_rasterization_data.attributes[i];
+
+                            if let (
+                                EShaderAttribute::Vec4(a_vec),
+                                EShaderAttribute::Vec4(b_vec),
+                                EShaderAttribute::Vec4(c_vec),
+                            ) = (a_extra_data, b_extra_data, c_extra_data)
+                            {
+                                let interpolation_data = Self::project_correction_interpolation::<4>(
+                                    &a_vec,
+                                    &b_vec,
+                                    &c_vec,
+                                    a.w,
+                                    b.w,
+                                    c.w,
+                                    &test_result,
+                                );
+                                data.attributes
+                                    .push(EShaderAttribute::Vec4(interpolation_data));
+                            } else if let (
+                                EShaderAttribute::Vec3(a_vec),
+                                EShaderAttribute::Vec3(b_vec),
+                                EShaderAttribute::Vec3(c_vec),
+                            ) = (a_extra_data, b_extra_data, c_extra_data)
+                            {
+                                let interpolation_data = Self::project_correction_interpolation::<3>(
+                                    &a_vec,
+                                    &b_vec,
+                                    &c_vec,
+                                    a.w,
+                                    b.w,
+                                    c.w,
+                                    &test_result,
+                                );
+                                data.attributes
+                                    .push(EShaderAttribute::Vec3(interpolation_data));
+                            } else if let (
+                                EShaderAttribute::Vec2(a_vec),
+                                EShaderAttribute::Vec2(b_vec),
+                                EShaderAttribute::Vec2(c_vec),
+                            ) = (a_extra_data, b_extra_data, c_extra_data)
+                            {
+                                let interpolation_data = Self::project_correction_interpolation::<2>(
+                                    &a_vec,
+                                    &b_vec,
+                                    &c_vec,
+                                    a.w,
+                                    b.w,
+                                    c.w,
+                                    &test_result,
+                                );
+                                data.attributes
+                                    .push(EShaderAttribute::Vec2(interpolation_data));
+                            } else if let (
+                                EShaderAttribute::Vec1(a_vec),
+                                EShaderAttribute::Vec1(b_vec),
+                                EShaderAttribute::Vec1(c_vec),
+                            ) = (a_extra_data, b_extra_data, c_extra_data)
+                            {
+                                let interpolation_data = Self::project_correction_interpolation::<1>(
+                                    &a_vec,
+                                    &b_vec,
+                                    &c_vec,
+                                    a.w,
+                                    b.w,
+                                    c.w,
+                                    &test_result,
+                                );
+                                data.attributes
+                                    .push(EShaderAttribute::Vec1(interpolation_data));
+                            } else {
+                                panic!("");
+                            }
+                        }
+                        let color: Vector4<f32>;
+                        {
+                            let shader = shader.lock().unwrap();
+                            color = shader.fragment(&data);
+                        }
+                        let z_at_screen_sapce =
+                            Vector3::new(a.z, b.z, c.z).dot(&test_result.weight());
+                        render_result.push(RenderResult {
+                            position: Vector3::new(x, y, z_at_screen_sapce),
+                            color,
+                        });
+                    }
+                }
+            }
+        }
+        render_result
+    }
+
     pub fn render_graphics_pipeline<T: ShaderVertexData>(
         &mut self,
         graphics_pipeline: &GraphicsPipeline<T>,
         vertex_buffer: &Vec<T>,
         index_buffer: Option<&Vec<u32>>,
     ) {
-        let (width, height) = self.get_back_buffer_width_height();
-        let (width, height) = (width as f32, height as f32);
-        let shader = graphics_pipeline.shader;
-        let triangle_count = {
-            match index_buffer {
-                Some(index_buffer) => {
-                    assert_eq!(index_buffer.len() % 3, 0);
-                    index_buffer.len() / 3
-                }
-                None => {
-                    assert_eq!(vertex_buffer.len() % 3, 0);
-                    vertex_buffer.len() / 3
-                }
-            }
-        };
-
-        for i in (0..triangle_count).step_by(1) {
-            let (a, b, c) = {
+        let pool = GLOBAL_RENDERER_THREAD_POOL.lock().unwrap();
+        pool.in_place_scope(|scope| {
+            let triangle_count = {
                 match index_buffer {
-                    Some(index_buffer) => (
-                        vertex_buffer
-                            .get(*index_buffer.get(i * 3 + 0).unwrap() as usize)
-                            .unwrap(),
-                        vertex_buffer
-                            .get(*index_buffer.get(i * 3 + 1).unwrap() as usize)
-                            .unwrap(),
-                        vertex_buffer
-                            .get(*index_buffer.get(i * 3 + 2).unwrap() as usize)
-                            .unwrap(),
-                    ),
-                    None => (
-                        vertex_buffer.get(i * 3 + 0).unwrap(),
-                        vertex_buffer.get(i * 3 + 1).unwrap(),
-                        vertex_buffer.get(i * 3 + 2).unwrap(),
-                    ),
+                    Some(index_buffer) => {
+                        assert_eq!(index_buffer.len() % 3, 0);
+                        index_buffer.len() / 3
+                    }
+                    None => {
+                        assert_eq!(vertex_buffer.len() % 3, 0);
+                        vertex_buffer.len() / 3
+                    }
                 }
             };
-            let a_rasterization_data = shader.vertex(a);
-            let b_rasterization_data = shader.vertex(b);
-            let c_rasterization_data = shader.vertex(c);
-            assert_eq!(
-                a_rasterization_data.extra_datas.len(),
-                b_rasterization_data.extra_datas.len()
-            );
-            assert_eq!(
-                b_rasterization_data.extra_datas.len(),
-                c_rasterization_data.extra_datas.len()
-            );
-
-            let a = Self::divide_by_w(&a_rasterization_data.position);
-            let b = Self::divide_by_w(&b_rasterization_data.position);
-            let c = Self::divide_by_w(&c_rasterization_data.position);
-
-            match graphics_pipeline.face_culling_mode {
-                EFaceCullingMode::None => {}
-                EFaceCullingMode::Front => {
-                    let is_face_culling = Self::face_culling(&a.xyz(), &b.xyz(), &c.xyz());
-                    if is_face_culling == false {
-                        continue;
+            let (width, height) = self.get_back_buffer_width_height();
+            let (sender, receiver) = channel();
+            for i in 0..triangle_count {
+                let sender = sender.clone();
+                let (a, b, c) = {
+                    match index_buffer {
+                        Some(index_buffer) => (
+                            vertex_buffer
+                                .get(*index_buffer.get(i * 3 + 0).unwrap() as usize)
+                                .unwrap(),
+                            vertex_buffer
+                                .get(*index_buffer.get(i * 3 + 1).unwrap() as usize)
+                                .unwrap(),
+                            vertex_buffer
+                                .get(*index_buffer.get(i * 3 + 2).unwrap() as usize)
+                                .unwrap(),
+                        ),
+                        None => (
+                            vertex_buffer.get(i * 3 + 0).unwrap(),
+                            vertex_buffer.get(i * 3 + 1).unwrap(),
+                            vertex_buffer.get(i * 3 + 2).unwrap(),
+                        ),
                     }
-                }
-                EFaceCullingMode::Back => {
-                    let is_face_culling = Self::face_culling(&a.xyz(), &b.xyz(), &c.xyz());
-                    if is_face_culling {
-                        continue;
-                    }
-                }
+                };
+                scope.spawn(move |_| {
+                    let render_results = Self::render_triangle(
+                        *a,
+                        *b,
+                        *c,
+                        Vector2::new(width, height),
+                        Arc::clone(&graphics_pipeline.shader),
+                        graphics_pipeline.face_culling_mode,
+                    );
+                    sender.send(render_results).unwrap();
+                });
             }
-
-            if !Self::is_valid_triangle(&a.xy(), &b.xy(), &c.xy()) {
-                continue;
-            }
-
-            let bounding_box = crate::rect::Rect::bounding_box(&a.xy(), &b.xy(), &c.xy());
-            let y_range_start = (bounding_box.y * height) as i32;
-            let y_range_end = ((bounding_box.y + bounding_box.height) * height) as i32;
-            let y_range = (y_range_start..y_range_end).map(|x| x as f32 / height);
-
-            for y in y_range {
-                let x_range_start = (bounding_box.x * width) as i32;
-                let x_range_end = ((bounding_box.x + bounding_box.width) * width) as i32;
-                let x_range = (x_range_start..x_range_end).map(|x| x as f32 / width);
-                for x in x_range {
-                    let test_result = BarycentricTestResult::test(&a.xy(), &b.xy(), &c.xy(), x, y);
-                    if test_result.is_inside_triangle {
-                        let mut data = RasterizationData {
-                            position: Vector4::identity(),
-                            extra_datas: vec![],
-                        };
-
-                        for (i, (a_extra_data, b_extra_data, c_extra_data)) in izip!(
-                            &a_rasterization_data.extra_datas,
-                            &b_rasterization_data.extra_datas,
-                            &c_rasterization_data.extra_datas
-                        )
-                        .enumerate()
-                        {
-                            if let (
-                                EShaderExtraData::Vec4(a_vec),
-                                EShaderExtraData::Vec4(b_vec),
-                                EShaderExtraData::Vec4(c_vec),
-                            ) = (a_extra_data, b_extra_data, c_extra_data)
-                            {
-                                let interpolation_data =
-                                    Self::project_correction_interpolation_vec4(
-                                        &a_vec,
-                                        &b_vec,
-                                        &c_vec,
-                                        a.w,
-                                        b.w,
-                                        c.w,
-                                        &test_result,
-                                    );
-                                data.extra_datas
-                                    .insert(i, EShaderExtraData::Vec4(interpolation_data));
-                            } else if let (
-                                EShaderExtraData::Vec3(a_vec),
-                                EShaderExtraData::Vec3(b_vec),
-                                EShaderExtraData::Vec3(c_vec),
-                            ) = (a_extra_data, b_extra_data, c_extra_data)
-                            {
-                                let interpolation_data =
-                                    Self::project_correction_interpolation_vec3(
-                                        &a_vec,
-                                        &b_vec,
-                                        &c_vec,
-                                        a.w,
-                                        b.w,
-                                        c.w,
-                                        &test_result,
-                                    );
-                                data.extra_datas
-                                    .insert(i, EShaderExtraData::Vec3(interpolation_data));
-                            } else if let (
-                                EShaderExtraData::Vec2(a_vec),
-                                EShaderExtraData::Vec2(b_vec),
-                                EShaderExtraData::Vec2(c_vec),
-                            ) = (a_extra_data, b_extra_data, c_extra_data)
-                            {
-                                let interpolation_data =
-                                    Self::project_correction_interpolation_vec2(
-                                        &a_vec,
-                                        &b_vec,
-                                        &c_vec,
-                                        a.w,
-                                        b.w,
-                                        c.w,
-                                        &test_result,
-                                    );
-                                data.extra_datas
-                                    .insert(i, EShaderExtraData::Vec2(interpolation_data));
-                            } else if let (
-                                EShaderExtraData::Vec1(a_vec),
-                                EShaderExtraData::Vec1(b_vec),
-                                EShaderExtraData::Vec1(c_vec),
-                            ) = (a_extra_data, b_extra_data, c_extra_data)
-                            {
-                                let interpolation_data =
-                                    Self::project_correction_interpolation_vec1(
-                                        &a_vec,
-                                        &b_vec,
-                                        &c_vec,
-                                        a.w,
-                                        b.w,
-                                        c.w,
-                                        &test_result,
-                                    );
-                                data.extra_datas
-                                    .insert(i, EShaderExtraData::Vec1(interpolation_data));
-                            } else {
-                                panic!("");
-                            }
-                        }
-                        let color = shader.fragment(&data);
-                        let z_at_screen_sapce =
-                            Vector3::new(a.z, b.z, c.z).dot(&test_result.weight());
-                        self.set_color_depth_func(
-                            &Vector3::new(x, y, z_at_screen_sapce),
-                            &color,
-                            &graphics_pipeline.depth_cmp_func,
-                        );
-                    }
+            for _ in 0..triangle_count {
+                let render_results = receiver.recv().unwrap();
+                for render_result in *render_results {
+                    self.set_color_depth_func(
+                        &render_result.position,
+                        &render_result.color,
+                        &graphics_pipeline.depth_cmp_func,
+                    );
                 }
             }
-        }
+        });
     }
 
     fn divide_by_w(vec4: &Vector4<f32>) -> Vector4<f32> {
@@ -434,140 +503,37 @@ impl<'a> Renderer<'a> {
         d0 + d1 > d2 && (d0 - d1).abs() < d2
     }
 
-    // fn interpolation(weight: &Vector3<f32>, value: &Vector3<f32>) -> f32 {
-    //     weight.dot(&value)
-    // }
-
-    // fn interpolation_vec4(
-    //     weight: &Vector3<f32>,
-    //     v0: &Vector4<f32>,
-    //     v1: &Vector4<f32>,
-    //     v2: &Vector4<f32>,
-    // ) -> Vector4<f32> {
-    //     Vector4::new(
-    //         Self::interpolation(weight, &Vector3::new(v0.x, v1.x, v2.x)),
-    //         Self::interpolation(weight, &Vector3::new(v0.y, v1.y, v2.y)),
-    //         Self::interpolation(weight, &Vector3::new(v0.z, v1.z, v2.z)),
-    //         Self::interpolation(weight, &Vector3::new(v0.w, v1.w, v2.w)),
-    //     )
-    // }
-
-    // fn interpolation_vec3(
-    //     weight: &Vector3<f32>,
-    //     v0: &Vector3<f32>,
-    //     v1: &Vector3<f32>,
-    //     v2: &Vector3<f32>,
-    // ) -> Vector3<f32> {
-    //     Vector3::new(
-    //         Self::interpolation(weight, &Vector3::new(v0.x, v1.x, v2.x)),
-    //         Self::interpolation(weight, &Vector3::new(v0.y, v1.y, v2.y)),
-    //         Self::interpolation(weight, &Vector3::new(v0.z, v1.z, v2.z)),
-    //     )
-    // }
-
-    // fn interpolation_vec2(
-    //     weight: &Vector3<f32>,
-    //     v0: &Vector2<f32>,
-    //     v1: &Vector2<f32>,
-    //     v2: &Vector2<f32>,
-    // ) -> Vector2<f32> {
-    //     Vector2::new(
-    //         Self::interpolation(weight, &Vector3::new(v0.x, v1.x, v2.x)),
-    //         Self::interpolation(weight, &Vector3::new(v0.y, v1.y, v2.y)),
-    //     )
-    // }
-
-    // fn get_weight_at_world_space(
-    //     z0: f32,
-    //     z1: f32,
-    //     z2: f32,
-    //     test_result_at_screen_sapce: &BarycentricTestResult,
-    // ) -> BarycentricTestResult {
-    //     if z0 == z1 && z1 == z2 {
-    //         *test_result_at_screen_sapce
-    //     } else {
-    //         let z_at_world_space = 1.0
-    //             / ((test_result_at_screen_sapce.w1 / z0)
-    //                 + (test_result_at_screen_sapce.w2 / z1)
-    //                 + (test_result_at_screen_sapce.w3 / z2));
-    //         BarycentricTestResult {
-    //             is_inside_triangle: false,
-    //             w1: z_at_world_space * test_result_at_screen_sapce.w1 / z0,
-    //             w2: z_at_world_space * test_result_at_screen_sapce.w2 / z1,
-    //             w3: z_at_world_space * test_result_at_screen_sapce.w3 / z2,
-    //         }
-    //     }
-    // }
-
-    fn get_zp(
+    fn get_weight_at_world_space(
         z0: f32,
         z1: f32,
         z2: f32,
         test_result_at_screen_sapce: &BarycentricTestResult,
-    ) -> (f32, f32, f32, f32) {
+    ) -> (f32, f32, f32) {
         if (z0 == z1) && (z1 == z2) {
             let w1 = test_result_at_screen_sapce.w1;
             let w2 = test_result_at_screen_sapce.w2;
             let w3 = test_result_at_screen_sapce.w3;
-            (w1 + w2 + w3, w1, w2, w3)
+            (w1, w2, w3)
         } else {
             let w1 = test_result_at_screen_sapce.w1 / z0;
             let w2 = test_result_at_screen_sapce.w2 / z1;
             let w3 = test_result_at_screen_sapce.w3 / z2;
-            (w1 + w2 + w3, w1, w2, w3)
+            let zp = w1 + w2 + w3;
+            (w1 / zp, w2 / zp, w3 / zp)
         }
     }
 
-    fn project_correction_interpolation_vec4(
-        c0: &Vector4<f32>,
-        c1: &Vector4<f32>,
-        c2: &Vector4<f32>,
+    fn project_correction_interpolation<const D: usize>(
+        c0: &nalgebra::SVector<f32, D>,
+        c1: &nalgebra::SVector<f32, D>,
+        c2: &nalgebra::SVector<f32, D>,
         z0: f32,
         z1: f32,
         z2: f32,
         test_result_at_screen_sapce: &BarycentricTestResult,
-    ) -> Vector4<f32> {
-        let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
-        (c0 * w1 + c1 * w2 + c2 * w3) / zp
-    }
-
-    fn project_correction_interpolation_vec3(
-        c0: &Vector3<f32>,
-        c1: &Vector3<f32>,
-        c2: &Vector3<f32>,
-        z0: f32,
-        z1: f32,
-        z2: f32,
-        test_result_at_screen_sapce: &BarycentricTestResult,
-    ) -> Vector3<f32> {
-        let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
-        (c0 * w1 + c1 * w2 + c2 * w3) / zp
-    }
-
-    fn project_correction_interpolation_vec2(
-        c0: &Vector2<f32>,
-        c1: &Vector2<f32>,
-        c2: &Vector2<f32>,
-        z0: f32,
-        z1: f32,
-        z2: f32,
-        test_result_at_screen_sapce: &BarycentricTestResult,
-    ) -> Vector2<f32> {
-        let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
-        (c0 * w1 + c1 * w2 + c2 * w3) / zp
-    }
-
-    fn project_correction_interpolation_vec1(
-        c0: &Vector1<f32>,
-        c1: &Vector1<f32>,
-        c2: &Vector1<f32>,
-        z0: f32,
-        z1: f32,
-        z2: f32,
-        test_result_at_screen_sapce: &BarycentricTestResult,
-    ) -> Vector1<f32> {
-        let (zp, w1, w2, w3) = Self::get_zp(z0, z1, z2, test_result_at_screen_sapce);
-        (c0 * w1 + c1 * w2 + c2 * w3) / zp
+    ) -> nalgebra::SVector<f32, D> {
+        let (w1, w2, w3) = Self::get_weight_at_world_space(z0, z1, z2, test_result_at_screen_sapce);
+        c0 * w1 + c1 * w2 + c2 * w3
     }
 
     fn face_culling(v1: &Vector3<f32>, v2: &Vector3<f32>, v3: &Vector3<f32>) -> bool {

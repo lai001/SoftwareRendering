@@ -12,6 +12,14 @@ pub enum ETextureFormat {
     // R32g32b32a32Float,
 }
 
+impl ETextureFormat {
+    pub fn get_channels(&self) -> usize {
+        match self {
+            ETextureFormat::R8g8b8a8Unorm => 4,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TextureDescriptor {
     pub width: usize,
@@ -24,7 +32,7 @@ pub struct TextureDescriptor {
 #[derive(Clone)]
 pub struct Texture {
     pub(crate) buffers: Vec<Box<Vec<u8>>>,
-    pub descriptor: TextureDescriptor,
+    pub(crate) descriptor: TextureDescriptor,
 }
 
 impl std::fmt::Debug for Texture {
@@ -42,23 +50,21 @@ impl std::fmt::Debug for Texture {
 }
 
 impl Texture {
-    fn get_channels(&self) -> usize {
-        match self.descriptor.format {
-            ETextureFormat::R8g8b8a8Unorm => 4,
-        }
-    }
-}
-
-impl Texture {
-    pub fn new(descriptor: TextureDescriptor) -> Texture {
+    pub fn from_buffers(buffers: Vec<Box<Vec<u8>>>, descriptor: TextureDescriptor) -> Texture {
         assert_eq!(descriptor.format, ETextureFormat::R8g8b8a8Unorm);
         assert_eq!(descriptor.r#type, ETextureType::Dim2D);
         assert_eq!(descriptor.array_size, 1);
         assert!(descriptor.width > 0);
         assert!(descriptor.height > 0);
+        Texture {
+            buffers,
+            descriptor,
+        }
+    }
 
+    pub fn from_descriptor(descriptor: TextureDescriptor) -> Texture {
         let mut buffers: Vec<Box<Vec<u8>>> = Vec::new();
-        for i in 0..descriptor.array_size {
+        for _ in 0..descriptor.array_size {
             let buffer: Vec<u8> = vec![
                 0;
                 (4 * descriptor.height * descriptor.width)
@@ -66,12 +72,9 @@ impl Texture {
                     .unwrap()
             ];
             let buffer: Box<Vec<u8>> = Box::new(buffer);
-            buffers.insert(i.try_into().unwrap(), buffer);
+            buffers.push(buffer);
         }
-        Texture {
-            buffers,
-            descriptor,
-        }
+        Self::from_buffers(buffers, descriptor)
     }
 
     pub fn from_file(
@@ -104,23 +107,11 @@ impl Texture {
                 ];
                 texture_buffer.copy_from_slice(image_buffers);
                 let texture_buffer: Box<Vec<u8>> = Box::new(texture_buffer);
-                texture_buffers.insert(0, texture_buffer);
+                texture_buffers.push(texture_buffer);
 
                 Ok(Texture::from_buffers(texture_buffers, descriptor))
             }
             Err(error) => Err(Box::new(error)),
-        }
-    }
-
-    pub fn from_buffers(buffers: Vec<Box<Vec<u8>>>, descriptor: TextureDescriptor) -> Texture {
-        assert_eq!(descriptor.format, ETextureFormat::R8g8b8a8Unorm);
-        assert_eq!(descriptor.r#type, ETextureType::Dim2D);
-        assert_eq!(descriptor.array_size, 1);
-        assert!(descriptor.width > 0);
-        assert!(descriptor.height > 0);
-        Texture {
-            buffers,
-            descriptor,
         }
     }
 
@@ -130,6 +121,10 @@ impl Texture {
 
     pub fn get_mut_buffers(&mut self) -> &mut Vec<Box<Vec<u8>>> {
         &mut self.buffers
+    }
+
+    pub fn get_descriptor(&self) -> &TextureDescriptor {
+        &self.descriptor
     }
 
     pub fn sample(&self, uv: &Vector3<f32>) -> Vector4<f32> {
@@ -148,7 +143,7 @@ impl Texture {
             (uv.y * self.descriptor.height as f32) as usize,
             self.descriptor.height - 1,
         );
-        let index = (y * self.descriptor.width + x) * self.get_channels();
+        let index = (y * self.descriptor.width + x) * self.descriptor.format.get_channels();
 
         let buffer = self.buffers.get(array_index).unwrap();
 

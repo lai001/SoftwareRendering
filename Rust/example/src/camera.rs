@@ -1,4 +1,4 @@
-use nalgebra::{Matrix4, Vector3, Vector4};
+use nalgebra::{Matrix4, Vector3};
 
 pub struct Camera {
     projection: Matrix4<f32>,

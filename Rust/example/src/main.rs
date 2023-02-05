@@ -1,24 +1,22 @@
-use nalgebra::Isometry3;
-use nalgebra::Matrix4;
-use nalgebra::Perspective3;
-use nalgebra::Point3;
-use nalgebra::Vector2;
-use nalgebra::Vector3;
-use nalgebra::Vector4;
-use sr::benchmark::Benchmark;
-use sr::color::preset_color;
-use sr::depth_cmp::EDepthCmpFunc;
-use sr::frame_buffer::*;
-use sr::graphics_pipeline::*;
-use sr::renderer::*;
-use sr::texture::*;
-use sr_example::camera::Camera;
-use sr_example::image_shader::*;
-use sr_example::model_shader::*;
-use sr_example::triangle_shader::*;
+use nalgebra::{Isometry3, Matrix4, Perspective3, Point3, Vector2, Vector3, Vector4};
+use sr::{
+    benchmark::Benchmark,
+    color::preset_color,
+    depth_cmp::EDepthCmpFunc,
+    graphics_pipeline::{EFaceCullingMode, GraphicsPipeline},
+    renderer::Renderer,
+    texture::{ETextureFormat, ETextureType, Texture, TextureDescriptor},
+};
+use sr_example::{
+    camera::Camera,
+    image_shader::{ImageShader, ImageShaderVertex},
+    model_shader::{ModelShader, ModelShaderVertex},
+    triangle_shader::{TriangleShader, TriangleShaderVertex},
+};
+use std::sync::{Arc, Mutex};
 
 fn save_file_to_disk(texture: &Texture, frame_index: u32) {
-    let descriptor = &texture.descriptor;
+    let descriptor = &texture.get_descriptor();
     let write_buffer = texture.get_buffers().get(0).unwrap().as_slice();
 
     let path = std::path::Path::new(std::env::current_dir().unwrap().to_str().unwrap())
@@ -50,7 +48,7 @@ fn test_draw_line(renderer: &mut Renderer) {
     );
 }
 
-fn test_draw_image(renderer: &mut Renderer, input_texture: &Texture) {
+fn test_draw_image(renderer: &mut Renderer, input_texture: Arc<Texture>) {
     let vertex_buffer = vec![
         ImageShaderVertex {
             position: Vector2::new(-1.0, 1.0),
@@ -65,10 +63,10 @@ fn test_draw_image(renderer: &mut Renderer, input_texture: &Texture) {
             uv: Vector2::new(0.0, 1.0),
         },
     ];
-    let shader = ImageShader {
-        texture: &input_texture,
-    };
-    let mut graphics_pipeline = GraphicsPipeline::from_shader(&shader);
+    let shader = Arc::new(Mutex::new(ImageShader {
+        texture: input_texture,
+    }));
+    let mut graphics_pipeline = GraphicsPipeline::from_shader(shader);
     graphics_pipeline.face_culling_mode = EFaceCullingMode::None;
     renderer.render_graphics_pipeline(&graphics_pipeline, &vertex_buffer, None);
 }
@@ -89,8 +87,8 @@ fn test_draw_triangle(renderer: &mut Renderer) {
         },
     ];
 
-    let shader = TriangleShader {};
-    let mut graphics_pipeline = GraphicsPipeline::from_shader(&shader);
+    let shader = Arc::new(Mutex::new(TriangleShader {}));
+    let mut graphics_pipeline = GraphicsPipeline::from_shader(shader);
     graphics_pipeline.face_culling_mode = EFaceCullingMode::None;
     graphics_pipeline.depth_cmp_func = EDepthCmpFunc::Always;
     renderer.render_graphics_pipeline(
@@ -100,7 +98,12 @@ fn test_draw_triangle(renderer: &mut Renderer) {
     );
 }
 
-fn test_draw_cube(renderer: &mut Renderer, input_texture: &Texture, time: f32, frame_index: u32) {
+fn test_draw_cube(
+    renderer: &mut Renderer,
+    input_texture: Arc<Texture>,
+    time: f32,
+    frame_index: u32,
+) {
     let vertex_buffer = vec![
         ModelShaderVertex {
             position: Vector3::new(-1.0, 1.0, -1.0),
@@ -159,14 +162,14 @@ fn test_draw_cube(renderer: &mut Renderer, input_texture: &Texture, time: f32, f
         ))
         * Matrix4::new_scaling(scale);
 
-    let shader = ModelShader {
-        texture: &input_texture,
+    let shader = Arc::new(Mutex::new(ModelShader {
+        texture: input_texture,
         model_matrix: model_matrix,
         view_matrix: view.to_matrix(),
         projection_matrix: *projection.as_matrix(),
-    };
+    }));
 
-    let graphics_pipeline = GraphicsPipeline::from_shader(&shader);
+    let graphics_pipeline = GraphicsPipeline::from_shader(shader);
     let index_buffer: Vec<u32> = vec![
         0, 1, 3, //
         1, 2, 3, //
@@ -187,7 +190,7 @@ fn test_draw_cube(renderer: &mut Renderer, input_texture: &Texture, time: f32, f
 fn test_draw_scene(
     renderer: &mut Renderer,
     scene: &russimp::scene::Scene,
-    input_texture: &Texture,
+    input_texture: Arc<Texture>,
     time: f32,
     frame_index: u32,
 ) {
@@ -199,7 +202,7 @@ fn test_draw_scene(
     for face in &mesh.faces {
         let indices = &face.0;
         for index in indices {
-            index_buffer.insert(index_buffer.len(), *index);
+            index_buffer.push(*index);
         }
         assert_eq!(indices.len(), 3);
 
@@ -228,9 +231,9 @@ fn test_draw_scene(
                 vertext_color: preset_color::white(),
                 uv: Vector2::new(c_texture_coord.x, c_texture_coord.y),
             };
-            vertex_buffer.insert(vertex_buffer.len(), a_vertex);
-            vertex_buffer.insert(vertex_buffer.len(), b_vertex);
-            vertex_buffer.insert(vertex_buffer.len(), c_vertex);
+            vertex_buffer.push(a_vertex);
+            vertex_buffer.push(b_vertex);
+            vertex_buffer.push(c_vertex);
         }
     }
 
@@ -252,13 +255,14 @@ fn test_draw_scene(
         ))
         * Matrix4::new_scaling(scale);
 
-    let shader = ModelShader {
-        texture: &input_texture,
+    let shader = Arc::new(Mutex::new(ModelShader {
+        texture: input_texture,
         model_matrix: model_matrix,
         view_matrix: *camera.get_view(),
         projection_matrix: *camera.get_projection(),
-    };
-    let graphics_pipeline = GraphicsPipeline::from_shader(&shader);
+    }));
+
+    let graphics_pipeline = GraphicsPipeline::from_shader(shader);
     renderer.render_graphics_pipeline(&graphics_pipeline, &vertex_buffer, Some(&index_buffer));
 }
 
@@ -266,15 +270,13 @@ fn main() {
     let delta: f32 = 1.0 / 30.0;
     let mut frame_index: u32 = 0;
     let mut time: f32 = frame_index as f32 * delta;
-    let descriptor = TextureDescriptor {
-        width: 800,
-        height: 600,
+    let mut renderer = Renderer::from_texture_descriptor(TextureDescriptor {
+        width: 2048,
+        height: 2048,
         array_size: 1,
         format: ETextureFormat::R8g8b8a8Unorm,
         r#type: ETextureType::Dim2D,
-    };
-    let mut frame_buffer = FrameBuffer::new(Texture::new(descriptor));
-    let mut renderer = Renderer::new(&mut frame_buffer);
+    });
 
     let scene = russimp::scene::Scene::from_file(
         "../../Resource/box_with_texutre.fbx",
@@ -285,30 +287,38 @@ fn main() {
     );
     let input_texture = Texture::from_file(&"../../Resource/ColorGrid.png".to_string(), true);
     if let (Ok(input_texture), Ok(scene)) = (input_texture, scene) {
+        let input_texture = Arc::new(input_texture);
+        let benchmark = Benchmark::run();
         loop {
             if frame_index >= 60 {
                 break;
             }
-            let mut benchmark = Benchmark::run();
-            renderer.clean_color(None);
-            renderer.clean_depth();
+            let benchmark = Benchmark::run();
+            renderer.clear_color(None);
+            renderer.clear_depth(None);
             // test_draw_image(&mut renderer, &input_texture);
             // test_draw_triangle(&mut renderer);
             // test_draw_line(&mut renderer);
             // test_draw_cube(&mut renderer, &input_texture, time, frame_index);
-            test_draw_scene(&mut renderer, &scene, &input_texture, time, frame_index);
+            test_draw_scene(
+                &mut renderer,
+                &scene,
+                Arc::clone(&input_texture),
+                time,
+                frame_index,
+            );
             let clone_texture = renderer
                 .get_frame_buffer()
                 .get_color_attachment()
-                .borrow()
                 .to_owned();
             std::thread::spawn(move || {
                 save_file_to_disk(&clone_texture, frame_index);
             });
             time += delta;
             frame_index += 1;
-            benchmark.end().print(None);
+            benchmark.print(None);
         }
+        benchmark.print(None);
     } else {
         panic!("");
     }
